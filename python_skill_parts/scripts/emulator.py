@@ -1,0 +1,320 @@
+import asyncio
+import builtins
+import logging
+import queue
+import threading
+import types
+from concurrent.futures import Future
+from dataclasses import dataclass, field
+from textwrap import dedent
+from typing import Any, Callable, Generator, Self
+
+logger = logging.getLogger("llassembly_python")
+logger.addHandler(logging.NullHandler())
+
+
+@dataclass
+class SubAgent:
+    name: str
+    include_path: str
+    objective: str | None
+    outputs_spec: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class SubAgentContext:
+    sub_agent: SubAgent
+    output_keys: list[str]
+    infer_result_hook: Callable[[str, dict[str, Any]], None]
+
+    def infer_result(self, agent_name: str, result: Any):
+        self.infer_result_hook(agent_name, result)
+
+
+class BaseSubAgent:
+    """Base class plans subclass to declare a sub-agent.
+
+    Plans import this from the virtual ``sub_agents`` module and subclass it at
+    *global scope*, supplying ``name`` / ``objective`` / ``output_spec`` /
+    ``existing`` as class attributes::
+
+        from sub_agents import BaseSubAgent
+
+        class AgentBuild(BaseSubAgent):
+            name = "build"
+            objective = "Build the project artifact from source"
+            output_spec = {"status": '"ok" on success or "error" on failure'}
+            existing = False
+
+    Every subclass is collected via :meth:`__init_subclass__` into the
+    per-emulator ``_registry`` so :meth:`Emulator.get_sub_agents` can enumerate
+    every declared agent without instantiating or running it.
+    """
+
+    # The ingestion queue this agent publishes requests to. Bound per-emulator
+    # so that concurrent ``Emulator`` instances never share state.
+    _ingestion_queue: "queue.Queue | None" = None
+    # The per-emulator collection of declared subclasses. A fresh list is bound
+    # onto the queue-bound base created per run (see ``SubAgentsModule``), so
+    # concurrent emulators never see each other's agents.
+    _registry: "list[type] | None" = None
+
+    # Metadata supplied by plan subclasses as class attributes. Declared here as
+    # defaults so the contract is explicit and instances need no constructor
+    # arguments (``AgentBuild()``).
+    name: str = ""
+    objective: str = ""
+    output_spec: dict[str, str] = {}
+    existing: bool = False
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # Register this subclass into the nearest ancestor that owns a registry.
+        # The queue-bound base created per emulator run *defines* ``_registry``
+        # in its own ``__dict__`` and must NOT register itself; only plan
+        # subclasses, which merely *inherit* the registry, are collected.
+        registry = cls._registry
+        if registry is not None and "_registry" not in cls.__dict__:
+            registry.append(cls)
+
+    async def run(self):
+        """Request that the host emulator run this sub-agent.
+
+        Packages this agent's description together with a
+        ``concurrent.futures.Future`` and hands it to the host via the
+        ingestion queue. The host thread fulfils that Future; we bridge it back
+        into *this* event loop with ``asyncio.wrap_future`` so the coroutine can
+        ``await`` the cross-thread result without blocking the loop.
+        """
+        if self._ingestion_queue is None:
+            raise RuntimeError("sub-agent is not bound to an emulator ingestion queue")
+        # A thread-safe Future: it is resolved from the host thread but awaited
+        # on the background event loop thread.
+        wait_result: Future = Future()
+        self._ingestion_queue.put((self.to_sub_agent(), wait_result))
+        return dict(
+            zip(self.output_spec.keys(), await asyncio.wrap_future(wait_result))
+        )
+
+    @classmethod
+    def to_sub_agent(cls) -> "SubAgent":
+        """Convert this declared subclass into a host-facing :class:`SubAgent`."""
+        return SubAgent(
+            name=cls.name,
+            include_path="global" if cls.existing else f"general/{cls.name}",
+            objective=cls.objective,
+            outputs_spec=cls.output_spec,
+        )
+
+
+class SubAgentsModule(types.ModuleType):
+    """The ``sub_agents`` module seen by user scripts.
+
+    A fresh instance is created per emulator run and injected into the user
+    script via a custom ``__import__`` (see :func:`_run_script`), so it never
+    touches ``sys.modules``. It exposes a single ``BaseSubAgent`` symbol: a
+    per-run subclass bound to this instance's ingestion queue and carrying a
+    fresh, empty registry. Plan scripts ``from sub_agents import BaseSubAgent``
+    and subclass it at global scope; every subclass registers itself into this
+    instance's registry, keeping concurrent emulators fully isolated.
+    """
+
+    def __init__(self, ingestion_queue: queue.Queue):
+        super().__init__("sub_agents")
+        self.__file__ = "<string>"
+        self._ingestion_queue = ingestion_queue
+        # Per-run collection of declared subclasses. The queue-bound base owns
+        # this list; ``BaseSubAgent.__init_subclass__`` appends to it. Concurrent
+        # emulators get distinct lists, so their agents never mix.
+        self.registry: list[type] = []
+        # A distinct, queue-bound base per run. Subclassing this (not the shared
+        # module-level ``BaseSubAgent``) is what binds plan agents to *this*
+        # emulator's queue and registry.
+        self.BaseSubAgent = type(
+            "BaseSubAgent",
+            (BaseSubAgent,),
+            {
+                "_ingestion_queue": self._ingestion_queue,
+                "_registry": self.registry,
+            },
+        )
+
+    def __getattr__(self, name: str) -> Any:
+        if name == "BaseSubAgent":
+            return self.BaseSubAgent
+        raise AttributeError(f"module {self.__name__!r} has no attribute {name!r}")
+
+
+@dataclass
+class _ScriptResult:
+    """Mutable holder used to communicate a background script's outcome back to
+    its owning :class:`Emulator` without sharing ``self`` with the worker."""
+
+    done: threading.Event = field(default_factory=threading.Event)
+    error: BaseException | None = None
+
+
+def _make_script_globals(
+    sub_agents_mod: "SubAgentsModule",
+) -> dict[str, Any]:
+    """Build the globals dict used to exec a plan, with ``import sub_agents``
+    resolved to ``sub_agents_mod``.
+
+    ``import sub_agents`` (and ``from sub_agents import ...``) is resolved by a
+    per-run ``__import__`` override installed into the script's ``__builtins__``.
+    This injects a fresh, isolated :class:`SubAgentsModule` without ever
+    touching ``sys.modules``; every other import falls through to the real
+    importer.
+    """
+    real_import = builtins.__import__
+
+    def _import(name, globals=None, locals=None, fromlist=(), level=0):
+        if level == 0 and name == "sub_agents":
+            return sub_agents_mod
+        return real_import(name, globals, locals, fromlist, level)
+
+    return {
+        "__name__": "__user_script__",
+        "__file__": "<string>",
+        "__builtins__": {**vars(builtins), "__import__": _import},
+    }
+
+
+def _run_script(
+    code: str,
+    ingestion_queue: queue.Queue,
+    result: _ScriptResult,
+) -> None:
+    """Compile and execute user code in a dedicated thread.
+
+    Compilation happens here (not in the main thread) so the whole lifecycle of
+    a run lives in one place. The plan defines a mandatory ``async def main()``
+    entry point; this function execs the plan body (which only declares agents
+    and defines ``main``) and then drives ``main`` with ``asyncio.run`` itself.
+    The plan must NOT call ``asyncio.run`` on its own.
+    """
+    sub_agents_mod = SubAgentsModule(ingestion_queue)
+    script_globals = _make_script_globals(sub_agents_mod)
+    try:
+        exec(compile(code, "<string>", "exec"), script_globals)
+        main = script_globals.get("main")
+        if main is None or not callable(main):
+            raise RuntimeError(
+                "plan must define an async entry point `async def main()`"
+            )
+        coro = main()
+        if not asyncio.iscoroutine(coro):
+            raise RuntimeError(
+                "plan entry point `main` must be an async function "
+                "(declared with `async def main()`)"
+            )
+        asyncio.run(coro)
+    except BaseException as exc:  # noqa: BLE001 - surfaced via .error
+        result.error = exc
+        raise
+    finally:
+        result.done.set()
+
+
+class Emulator:
+    def __init__(self, code: str):
+        # Retained so ``get_sub_agents`` can statically collect the declared
+        # sub-agent subclasses by exec'ing the plan body in isolation.
+        self._code = code
+        # Per-instance queue so concurrent emulators never share request state.
+        self.ingestion_queue: queue.Queue = queue.Queue()
+
+        # The user code owns its own event loop (it calls ``asyncio.run(...)``),
+        # so the entire script -- compilation and execution -- runs in a
+        # dedicated background thread and blocks there. The worker reports back
+        # through ``_result`` instead of receiving ``self``.
+        self._result = _ScriptResult()
+        self._thread = threading.Thread(
+            target=_run_script,
+            args=(code, self.ingestion_queue, self._result),
+            daemon=True,
+        )
+        self._thread.start()
+
+    def shutdown(self) -> None:
+        """Join the background script thread.
+
+        Safe to call multiple times. The thread is a daemon, so even if the
+        user script is still blocked it will not keep the process alive.
+        """
+        self._thread.join(timeout=1)
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.shutdown()
+
+    @classmethod
+    def from_code(cls, code: str) -> Self:
+        return cls(code)
+
+    def get_sub_agents(self) -> dict[str, SubAgent]:
+        """Statically collect every sub-agent the plan declares.
+
+        Executes the plan's module body in an isolated namespace with a fresh,
+        throwaway :class:`SubAgentsModule`. Running the body is enough to define
+        every global-scope ``class AgentX(BaseSubAgent)``; each definition
+        registers itself via :meth:`BaseSubAgent.__init_subclass__`. We then
+        convert each collected subclass into a :class:`SubAgent`.
+
+        This is a pure declaration scan. The plan body only declares agent
+        classes and defines ``async def main()``; ``main`` is never called here,
+        so exec'ing the body invokes no sub-agent.
+        """
+        # A throwaway queue/module: we never dispatch from this scan, so the
+        # queue is unused, but the bound base still needs one.
+        scan_mod = SubAgentsModule(queue.Queue())
+        script_globals = _make_script_globals(scan_mod)
+        exec(compile(self._code, "<string>", "exec"), script_globals)
+
+        sub_agents: dict[str, SubAgent] = {}
+        for agent_cls in scan_mod.registry:
+            sub_agent = agent_cls.to_sub_agent()
+            sub_agents[sub_agent.name] = sub_agent
+        return sub_agents
+
+    def iter_tool_calls(self) -> Generator[SubAgentContext, None, None]:
+        """Yield a context for every sub-agent the user script requests."""
+        while True:
+            try:
+                item = self.ingestion_queue.get(timeout=0.1)
+            except queue.Empty:
+                # No pending request. Stop only once the script has finished and
+                # drained any outstanding requests.
+                if self.is_finished():
+                    break
+                continue
+
+            emulator_agent, ingest_to = item
+
+            # ``infer_result`` is invoked from this (host) thread. ``ingest_to``
+            # is a ``concurrent.futures.Future`` which is thread-safe to fulfil
+            # directly; the awaiting coroutine is woken via ``wrap_future``.
+            def make_hook(
+                fut: Future,
+            ) -> Callable[[str, dict[str, Any]], None]:
+                def hook(agent_name: str, result: Any) -> None:
+                    fut.set_result(result)
+
+                return hook
+
+            yield SubAgentContext(
+                emulator_agent,
+                list(emulator_agent.outputs_spec.keys()),
+                make_hook(ingest_to),
+            )
+
+    def is_finished(self) -> bool:
+        return self._result.done.is_set()
+
+    @property
+    def error(self) -> BaseException | None:
+        """The exception raised by the user script, if any."""
+        return self._result.error
+
