@@ -1,11 +1,11 @@
 ---
 name: llassembly-control-flow
-description: Translate a natural language request into a control-flow plan written in a small, pure Python script, where every sub-agent is declared as a BaseSubAgent subclass and awaited inside an async main() entry point, and conditional logic branches on sub-agent output. Use when generating execution plans that orchestrate sub-agents.
+description: Translate a natural language request into control-flow plan written in a small, pure Python script representing orchestration logic. Where every sub-agent is declared as a BaseSubAgent subclass and running inside an main() entry point. Use when generating execution plans that orchestrate sub-agents.
 ---
 
 # Python Sub-Agent Orchestration
 
-Write a small, pure Python script that represents the control flow required to achieve the goal defined in the request. The script orchestrates sub-agents: each sub-agent is declared as a subclass of `BaseSubAgent` at module (global) scope, instantiated, and run, and the plan branches and loops based on the values they return. All orchestration logic lives inside a single mandatory `async def main()` entry point. Strictly follow the requirements defined in each section below.
+Write a small, pure Python script that represents the control flow required to achieve the goal defined in the request. The script orchestrates sub-agents: each sub-agent is declared as a subclass of `BaseSubAgent` at module (global) scope. All orchestration logic lives inside a single mandatory `def main()` entry point. Strictly follow the requirements defined in each section below.
 
 ## 0. Input and Output
 
@@ -13,7 +13,7 @@ Write a small, pure Python script that represents the control flow required to a
 A natural language request to translate into an orchestration script.
 
 **Output:**
-A valid, complete Python script based on the definitions in sections [1. Core Requirements], [2. Script Guidelines], and [3. Sub-Agent Definition].
+A valid, complete Python script based on the definitions in sections [1. Core Requirements], [2. Script Guidelines], and [3. Sub-Agent Definition] that represents orchestration control-flow plan.
 
 ## 1. Core Requirements
 
@@ -24,7 +24,7 @@ A valid, complete Python script based on the definitions in sections [1. Core Re
 1.5. Never write comments that describe work to be implemented later. Comments must only annotate existing code.
 1.6. Never use placeholders. Never produce simplified or demo implementations. Produce a full, complete script that satisfies all defined constraints.
 1.7. This script runs in a custom emulator. The emulator behaves according to the rules defined in this document.
-1.8. The script **must** define a single `async def main()` coroutine as its mandatory entry point. All orchestration (instantiating and awaiting sub-agents, branching, looping) lives inside `main`. The emulator imports the module and then drives `main` itself; the script must **not** call `asyncio.run`, `main()`, or otherwise start the coroutine on its own.
+1.8. The script **must** define a single `def main()` function as its mandatory entry point. All orchestration (instantiating and running sub-agents, branching, looping) lives inside `main`. The emulator imports the module and then drives `main` itself; the script itself must **not** call `main()`.
 1.9. Every sub-agent instantiated and run in the script must also be declared as described in section [3. Sub-Agent Definition].
 1.10. The script must read as a plan that orchestrates sub-agent execution. The sub-agents themselves provide the actual implementation.
 
@@ -35,14 +35,14 @@ A valid, complete Python script based on the definitions in sections [1. Core Re
 - Only the **Python standard library** is allowed. Do not import third-party packages.
 - **No network calls** of any kind.
 - **No file system access** (no reading, writing, opening, or deleting files).
-- **No threading, multiprocessing, or any other form of concurrency you introduce yourself.** You may `await` sub-agents inside `async def main()` (see section [3.4]), but you must not spawn threads, processes, or event loops, and you must not call `asyncio.run` — the emulator starts and drives `main` for you.
-- The script must be **pure, simple, script-like logic**: variable assignments, conditionals (`if`/`elif`/`else`), loops (`while`/`for`), comparisons, arithmetic, and `await`ing sub-agents. Keep it at the level of a straightforward control-flow script.
+- **No threading, multiprocessing, or any other form of concurrency you introduce yourself.** You may call sub-agents (using .run()) inside `def main()` (see section [3.4]), but you must not spawn threads, processes, or event loops, and you must not call `main()`  — the emulator starts and drives `main` for you.
+- The script must be **pure, simple, script-like logic**: variable assignments, conditionals (`if`/`elif`/`else`), loops (`while`/`for`), comparisons, arithmetic, and running sub-agents. Keep it at the level of a straightforward control-flow script.
 
 ### 2.2. State
 
 - Hold sub-agent results in ordinary local variables.
 - A sub-agent's result may be a string (including json string) or a number, so compare against the matching type.
-- Each time a sub-agent runs it returns a fresh result. Capture the result into a distinct, clearly named variable right after the call that produced it, then branch on that variable. Reusing the same variable name across different sub-agents overwrites the earlier value, so choose names that keep the values you still need alive across later invocations.
+- Each time a sub-agent runs it returns a fresh result. Capture the result into a distinct, clearly named variable right after the .run() that produced it, then branch on that variable. Reusing the same variable name across different sub-agents overwrites the earlier value, so choose names that keep the values you still need alive across later invocations.
 
 ## 3. Sub-Agent Definition
 
@@ -71,14 +71,13 @@ class BaseSubAgent(ABC):
 
     # -- required abstract method for any concrete runner ---------------------
     @abstractmethod
-    async def run(self) -> Any:
+    def run(self) -> dict[str, Any]:
         """Execute this sub-agent and return its result.
 
         Returns
         -------
-        Any
-            A string (including JSON-encoded), a number, or a dict mapping
-            output keys to their values, per `output_spec`.
+        dict[str, Any] # output-key: value
+            Where Any is a string (including JSON-encoded), a number, list or a dict mapping  per `output_spec`.
         """
 ```
 
@@ -112,7 +111,7 @@ class AgentBuild(BaseSubAgent):
     existing = False
 ```
 
-3.4. **Run the sub-agent** by instantiating its class with **no arguments** and awaiting its asynchronous `run` method. `run` must be `await`ed from within the `async def main()` entry point. The call returns the sub-agent's actual result (a string, a number, or a mapping, per its `output_spec`):
+3.4. **Run the sub-agent** by instantiating its class with **no arguments** and call it's  `run` method. `run` must be called from within the `def main()` entry point. The call returns the sub-agent's actual result (a string, a number, or a mapping, per its `output_spec`):
 
 ```python
 from sub_agents import BaseSubAgent
@@ -123,13 +122,13 @@ class AgentBuild(BaseSubAgent):
     output_spec = {"status": 'status: "ok" on success or "error" on failure'}
     existing = False
 
-async def main():
-    result = await AgentBuild().run()   # invoke the sub-agent and capture its result
+def main():
+    result = AgentBuild().run()   # invoke the sub-agent and capture its result
 ```
 
-The emulator imports the module and drives `main`; do not call `asyncio.run`, do not call `main()` yourself, and do not introduce threads, processes, or event loops (see section [2.1]).
+The emulator imports the module and drives `main`; do not call `main()` yourself, and do not introduce threads, processes, or event loops (see section [2.1]).
 
-3.5. Capture each result you need into a distinct, clearly named local variable right after the `await` that produced it, then branch on that variable (see section [2.2]).
+3.5. Capture each result you need into a distinct, clearly named local variable right after the .run() that produced it, then branch on that variable (see section [2.2]).
 
 3.6. Each declaration must be a complete, well-formed **interface** — a real name, objective, and accurate output contract — not a placeholder, dummy, or demo. Completeness here means a faithful interface the execution loop can dispatch to; it does **not** mean implementing the sub-agent's work.
 
@@ -157,7 +156,7 @@ The execution loop re-invokes sub-agents one at a time, carrying state (local va
 
 4.5. **Bound the loop.** Initialize a retry counter (for example `attempts = 0`) per sub-agent or/and per group of sub-agents, increment it on each iteration, and compare it against a maximum so the loop breaks out to an abort/give-up path. This guarantees the plan terminates even when the goal cannot be reached, and respects the emulator's execution limit.
 
-Example loop pattern (declare the sub-agent subclasses at global scope first, then the `async def main()` orchestration that captures each result into a clearly named variable right after the call that produced it):
+Example loop pattern (declare the sub-agent subclasses at global scope first, then the `def main()` orchestration that captures each result into a clearly named variable right after the call that produced it):
 
 ```python
 from sub_agents import BaseSubAgent
@@ -179,18 +178,18 @@ class AgentVerify(BaseSubAgent):
     existing = False
 
 
-async def main():
+def main():
     attempts = 0          # initialize the retry counter
     max_attempts = 3      # bound the loop so the plan always terminates
     succeeded = False     # track whether the goal was achieved
 
     while attempts < max_attempts:        # loop until verified or budget exhausted
         attempts += 1                     # spend one retry on this iteration
-        build_result = await AgentBuild().run()   # invoke the build sub-agent
+        build_result = AgentBuild().run()   # invoke the build sub-agent
         build_status = build_result["status"]     # capture build status before reuse
         if build_status != "ok":                  # build failed
             continue                              # retry the build on the next iteration
-        verify_result = await AgentVerify().run() # invoke the verifier sub-agent
+        verify_result = AgentVerify().run() # invoke the verifier sub-agent
         verify_passed = verify_result["all_passed"]  # capture verifier flag distinctly
         if verify_passed == "true":               # verification confirmed the goal
             succeeded = True                      # record success

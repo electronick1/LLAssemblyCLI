@@ -31,9 +31,6 @@ class SubAgentContext:
     output_keys: list[str]
     infer_result_hook: Callable[[str, dict[str, Any]], None]
 
-    def infer_result(self, agent_name: str, result: Any):
-        self.infer_result_hook(agent_name, result)
-
 
 @dataclass
 class AsmInstruction:

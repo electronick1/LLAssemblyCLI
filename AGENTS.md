@@ -33,7 +33,7 @@ Key consequences for editing:
 - Change shared behavior (the driver, generator agent, references) in `common_skill_parts/`.
 - Change plan-language or emulator semantics in the matching `*_skill_parts/` dir — and
   usually in **both** variants if the change is conceptual (they intentionally mirror each
-  other: ASM control flow vs. pure-Python `async def main()` control flow).
+  other: ASM control flow vs. pure-Python `def main()` control flow).
 
 ## How the runtime fits together (not obvious from filenames)
 
@@ -41,8 +41,8 @@ Key consequences for editing:
   `emulator.py` **from its own directory** (`_import_emulator` via `importlib`), which is why
   both files must land as siblings in `scripts/` after the overlay copy.
 - Both `emulator.py` variants expose the same contract consumed by the driver:
-  `Emulator.from_code(text)`, `.get_sub_agents()`, `.iter_tool_calls()`, `.is_finished()`,
-  and `SubAgentContext.infer_result(...)`. Preserve this interface when editing either variant.
+  `Emulator.from_code(text)`, `.get_sub_agents()`, `.iter_tool_calls()`, `.is_finished()`.
+  Preserve this interface when editing either variant.
 - The plan file is always `plan.llassembly` (`Config.workdir_plan_path`) regardless of
   variant; the ASM variant fills it with assembly, the Python variant with a Python script.
 - Loop state lives at `${LLASSEMBLY_LOOP_PATH:-/tmp}/llassembly/<LLASSEMBLY_LOOP_ID>/`
