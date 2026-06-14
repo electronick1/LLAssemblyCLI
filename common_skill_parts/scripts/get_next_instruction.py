@@ -44,30 +44,30 @@ NEXT_COMMAND_GET_CONTEXT = textwrap.dedent("""
     Stage 2:
 
     Give the full directory path where work results should be saved — this is where your workdir/root directory
-    is (where you executed from), NOT the llassembly skill, agents, or scripts directory.
+    is for results of the request, NOT the llassembly skill, agents, or scripts directory.
 
     Re-run `LLASSEMBLY_LOOP_ID={loop_id} python scripts/get_next_instruction.py "<path>"` write path as 1 argument.
     """)
 
 NEXT_COMMAND_CREATE_PLAN = textwrap.dedent("""
     Stage 3:
-    Run the Task tool to launch the `llassembly-control-flow` as a sub-agent.
+    Run the Task tool to launch the `llassembly-control-flow` as a separate/nested sub-agent.
 
     After `llassembly-control-flow` returns re-run `LLASSEMBLY_LOOP_ID={loop_id} python scripts/get_next_instruction.py`
     with no arguments yourself in the current session to continue.
 
-    Execute the agent defined in `agents/llassembly-control-flow.md` and
-    pass ONLY this 2 instructions to `llassembly-control-flow` :
-    1. Compile the goal into an control-flow plan and write it to: `{plan_path}`
-    2. Your only task is to write that plan file. As soon as the file is written, 
-    STOP and return control to the caller. Do NOT run any scripts, do NOT execute the plan,
+    Execute the agent defined in `agents/llassembly-control-flow.md` and pass the following instructions
+    to `llassembly-control-flow`:
+    1. Translate the goal into executable control-flow exactly following `agents/llassembly-control-flow.md` specification and write it to: `{plan_path}`
+    2. Your only task is to write that file. As soon as the file is written, 
+    STOP and return control to the caller. Do NOT run any scripts, do NOT execute the control-flows
     and do NOT call `scripts/get_next_instruction.py` yourself.
 
 """)
 
 NEXT_COMMAND_GENERATE_SUB_AGENT = textwrap.dedent("""
     Stage 4:
-    Run the Task tool to launch the `llassembly-generate-sub-agents` to create required
+    Run the Task tool to launch the `llassembly-generate-sub-agents` separatly to create required
     for control-flow sub-agent called: `{sub_agent_name}`
 
     After `llassembly-generate-sub-agents` returns re-run `LLASSEMBLY_LOOP_ID={loop_id} python scripts/get_next_instruction.py`
@@ -80,8 +80,7 @@ NEXT_COMMAND_GENERATE_SUB_AGENT = textwrap.dedent("""
         - sub-agent path: `{sub_agent_path}`
         - sub-agent objective: `{sub_agent_objective}`
     2. Your only task is to create that file. As soon as the file is written, STOP and return
-    control to the caller. Do NOT run any scripts, do NOT execute the plan, and do NOT call
-    `scripts/get_next_instruction.py` yourself.
+    control to the caller. Do NOT run any scripts, and do NOT call `scripts/get_next_instruction.py` yourself.
 
     The control-flow plan that orchestrates generated sub-agents: {plan_path}
 
@@ -328,7 +327,7 @@ def _try_step_run_init_sub_agents(
     emulator = _import_emulator().Emulator.from_code(plan_path.read_text())
     for sub_agent in emulator.get_sub_agents().values():
         if sub_agent.include_path.startswith("general/"):
-            sub_agent_path = config.workdir_path / "agents" / sub_agent.name
+            sub_agent_path = config.workdir_path / "agents" / Path(f"{sub_agent.name}.md")
             if not sub_agent_path.exists():
                 next_command = NEXT_COMMAND_GENERATE_SUB_AGENT.format(
                     sub_agent_path=sub_agent_path,
@@ -412,7 +411,7 @@ def _step_execute_llassembly(
 
                 next_command_text = NEXT_COMMAND_EXECUTE_SUB_AGENT.format(
                     agent_name=agent.name,
-                    agent_path=config.workdir_path / "agents" / agent.name,
+                    agent_path=config.workdir_path / "agents" / Path(f"{agent.name}.md"),
                     objective=objective,
                     output_desc=output_desc,
                     output_args=output_keys_str,

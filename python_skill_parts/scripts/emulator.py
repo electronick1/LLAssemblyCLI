@@ -2,7 +2,6 @@ import builtins
 import logging
 import queue
 import threading
-import types
 from dataclasses import dataclass, field
 from typing import Any, Callable, Generator, Protocol, Self
 
@@ -41,11 +40,10 @@ class SubAgentContext:
 class BaseSubAgent:
     """Base class plans subclass to declare a sub-agent.
 
-    Plans import this from the virtual ``sub_agents`` module and subclass it at
-    *global scope*, supplying ``name`` / ``objective`` / ``output_spec`` /
+    The emulator injects this class directly into the plan's global namespace
+    (see :func:`_make_script_globals`), so plans never import it. Plans subclass
+    it at *global scope*, supplying ``name`` / ``objective`` / ``output_spec`` /
     ``existing`` as class attributes::
-
-        from sub_agents import BaseSubAgent
 
         class AgentBuild(BaseSubAgent):
             name = "build"
@@ -62,7 +60,7 @@ class BaseSubAgent:
     # so that concurrent ``Emulator`` instances never share state.
     _ingestion_queue: queue.Queue | None = None
     # The per-emulator collection of declared subclasses. A fresh list is bound
-    # onto the queue-bound base created per run (see ``SubAgentsModule``), so
+    # onto the queue-bound base created per run (see ``_make_run_base``), so
     # concurrent emulators never see each other's agents.
     _registry: list[type] | None = None
 
@@ -107,42 +105,30 @@ class BaseSubAgent:
         return dict(result_holder)
 
 
-class SubAgentsModule(types.ModuleType):
-    """The ``sub_agents`` module seen by user scripts.
+def _make_run_base(
+    ingestion_queue: queue.Queue,
+) -> tuple[type[BaseSubAgent], list[type[BaseSubAgent]]]:
+    """Build a fresh, queue-bound :class:`BaseSubAgent` subclass for one run.
 
-    A fresh instance is created per emulator run and injected into the user
-    script via a custom ``__import__`` (see :func:`_run_script`), so it never
-    touches ``sys.modules``. It exposes a single ``BaseSubAgent`` symbol: a
-    per-run subclass bound to this instance's ingestion queue and carrying a
-    fresh, empty registry. Plan scripts ``from sub_agents import BaseSubAgent``
-    and subclass it at global scope; every subclass registers itself into this
-    instance's registry, keeping concurrent emulators fully isolated.
+    A distinct base is created per emulator run and injected into the plan's
+    globals (see :func:`_make_script_globals`). Subclassing this (not the shared
+    module-level ``BaseSubAgent``) is what binds plan agents to *this* run's
+    ingestion queue and registry.
+
+    The returned ``registry`` is the per-run collection of declared subclasses.
+    The queue-bound base owns it; ``BaseSubAgent.__init_subclass__`` appends to
+    it. Concurrent emulators get distinct lists, so their agents never mix.
     """
-
-    def __init__(self, ingestion_queue: queue.Queue):
-        super().__init__("sub_agents")
-        self.__file__ = "<string>"
-        self._ingestion_queue = ingestion_queue
-        # Per-run collection of declared subclasses. The queue-bound base owns
-        # this list; ``BaseSubAgent.__init_subclass__`` appends to it. Concurrent
-        # emulators get distinct lists, so their agents never mix.
-        self.registry: list[type[BaseSubAgent]] = []
-        # A distinct, queue-bound base per run. Subclassing this (not the shared
-        # module-level ``BaseSubAgent``) is what binds plan agents to *this*
-        # emulator's queue and registry.
-        self.BaseSubAgent = type(
-            "BaseSubAgent",
-            (BaseSubAgent,),
-            {
-                "_ingestion_queue": self._ingestion_queue,
-                "_registry": self.registry,
-            },
-        )
-
-    def __getattr__(self, name: str) -> Any:
-        if name == "BaseSubAgent":
-            return self.BaseSubAgent
-        raise AttributeError(f"module {self.__name__!r} has no attribute {name!r}")
+    registry: list[type[BaseSubAgent]] = []
+    run_base = type(
+        "BaseSubAgent",
+        (BaseSubAgent,),
+        {
+            "_ingestion_queue": ingestion_queue,
+            "_registry": registry,
+        },
+    )
+    return run_base, registry
 
 
 @dataclass
@@ -154,29 +140,20 @@ class _ScriptResult:
     error: BaseException | None = None
 
 
-def _make_script_globals(
-    sub_agents_mod: "SubAgentsModule",
-) -> dict[str, Any]:
-    """Build the globals dict used to exec a plan, with ``import sub_agents``
-    resolved to ``sub_agents_mod``.
+def _make_script_globals(run_base: type[BaseSubAgent]) -> dict[str, Any]:
+    """Build the globals dict used to exec a plan, with ``BaseSubAgent``
+    injected directly into the namespace.
 
-    ``import sub_agents`` (and ``from sub_agents import ...``) is resolved by a
-    per-run ``__import__`` override installed into the script's ``__builtins__``.
-    This injects a fresh, isolated :class:`SubAgentsModule` without ever
-    touching ``sys.modules``; every other import falls through to the real
-    importer.
+    The per-run, queue-bound base (see :func:`_make_run_base`) is placed into
+    the plan's globals under the name ``BaseSubAgent``. Plans subclass it at
+    global scope without importing anything; ``__builtins__`` is the unmodified
+    real builtins.
     """
-    real_import = builtins.__import__
-
-    def _import(name, globals=None, locals=None, fromlist=(), level=0):
-        if level == 0 and name == "sub_agents":
-            return sub_agents_mod
-        return real_import(name, globals, locals, fromlist, level)
-
     return {
         "__name__": "__user_script__",
         "__file__": "<string>",
-        "__builtins__": {**vars(builtins), "__import__": _import},
+        "__builtins__": vars(builtins),
+        "BaseSubAgent": run_base,
     }
 
 
@@ -192,8 +169,8 @@ def _run_script(
     entry point; this function execs the plan body (which only declares agents
     and defines ``main``) and then calls ``main`` directly.
     """
-    sub_agents_mod = SubAgentsModule(ingestion_queue)
-    script_globals = _make_script_globals(sub_agents_mod)
+    run_base, _registry = _make_run_base(ingestion_queue)
+    script_globals = _make_script_globals(run_base)
     try:
         exec(compile(code, "<string>", "exec"), script_globals)
         main = script_globals.get("main")
@@ -260,23 +237,24 @@ class Emulator:
         """Statically collect every sub-agent the plan declares.
 
         Executes the plan's module body in an isolated namespace with a fresh,
-        throwaway :class:`SubAgentsModule`. Running the body is enough to define
-        every global-scope ``class AgentX(BaseSubAgent)``; each definition
-        registers itself via :meth:`BaseSubAgent.__init_subclass__`. We then
-        convert each collected subclass into a :class:`SubAgent`.
+        throwaway queue-bound base injected as ``BaseSubAgent``. Running the body
+        is enough to define every global-scope ``class AgentX(BaseSubAgent)``;
+        each definition registers itself via
+        :meth:`BaseSubAgent.__init_subclass__`. We then convert each collected
+        subclass into a :class:`SubAgent`.
 
         This is a pure declaration scan. The plan body only declares agent
         classes and defines ``main``; ``main`` is never called here,
         so exec'ing the body invokes no sub-agent.
         """
-        # A throwaway queue/module: we never dispatch from this scan, so the
-        # queue is unused, but the bound base still needs one.
-        scan_mod = SubAgentsModule(queue.Queue())
-        script_globals = _make_script_globals(scan_mod)
+        # A throwaway queue: we never dispatch from this scan, so the queue is
+        # unused, but the bound base still needs one.
+        run_base, registry = _make_run_base(queue.Queue())
+        script_globals = _make_script_globals(run_base)
         exec(compile(self._code, "<string>", "exec"), script_globals)
 
         sub_agents: dict[str, SubAgent] = {}
-        for agent_cls in scan_mod.registry:
+        for agent_cls in registry:
             sub_agent = SubAgent.from_base_sub_agent(agent_cls)
             sub_agents[sub_agent.name] = sub_agent
         return sub_agents

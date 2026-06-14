@@ -2,7 +2,7 @@
 
 This reference guides the **generator agent** (`llassembly-generate-sub-agents`) when it
 writes a **worker sub-agent** definition file. A worker sub-agent is one node of work that the
-control-flow plan  invokes by name and the execution loop runs once per invocation, carrying
+control-flow  invokes by name and the execution loop runs once per invocation, carrying
 state between invocations.
 
 It covers the four worker roles that appear in almost every loop — **coding**,
@@ -13,14 +13,14 @@ read-only exploration workers, see `research-sub-agents.md` instead.
 
 - **One responsibility.** A worker does exactly one job derived from its objective. Do not bundle
   unrelated actions; that is what separate workers and the control-flow are for.
-- **Report comparable outputs.** The control-flow branches with comparing on the worker's
-  `OUTPUT_<X>` values. Emit stable, machine-comparable values — prefer fixed strings over free-form
+- **Report comparable outputs.** The control-flow branches by comparing on the worker's
+  named outputs. Emit stable, machine-comparable values — prefer fixed strings over free-form
   prose.
 - **Idempotent and resumable.** The loop is crash-safe and may re-run a worker. Re-running with
   the same inputs must be safe (no duplicated edits, no double-applied side effects).
 - **Complete, never demo.** No placeholder, dummy, simplified, or TODO behavior. The worker
   must be fully runnable by the execution loop.
-- **Real work lives in the worker, not the plan.** The control-flow only orchestrates; the
+- **Real work lives in the worker, not the control-flow.** The control-flow only orchestrates; the
   worker file is the only place the behavior is described.
 
 ## Coding workers (implement / modify code)

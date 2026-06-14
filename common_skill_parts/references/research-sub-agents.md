@@ -8,6 +8,7 @@ Use a research worker when a plan step must *find out* something before later st
 locating where a behavior lives, reading existing contracts, surveying structure, collecting
 facts, or answering an open question about the codebase or environment.
 
+
 ## Defining trait: read-only
 
 - A research worker **never mutates state** — no edits, no file creation, no builds, no
@@ -26,7 +27,7 @@ facts, or answering an open question about the codebase or environment.
 
 ## Outputs the control-flow can branch on
 
-The control-flow still branches on this worker's `OUTPUT_<X>` values with comparing, so make the
+The control-flow still branches by comparing on this worker's named outputs, so make the
 result both human-readable and machine-comparable:
 
 - Report a found/not-found style status the plan can test, e.g. `OUTPUT_1` =
