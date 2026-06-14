@@ -1,4 +1,5 @@
-# LLAssemblyCLI. Code driven sub-agents and loop orchestration
+# LLAssemblyCLI.
+# Code driven sub-agents and loop orchestration
 
 LLAssemblyCLI is a skill whose defining idea is simple: 
 **don't let an LLM improvise the orchestration — compile it into code and let code drive it.**
@@ -66,11 +67,13 @@ result feedback — is deterministic code. Control flow never leaves the code.
 
 ## Installation
 
-Two build scripts exists for different types of plan emulators that copy the
-shared parts into a target directory as `llassembly-agentic-loop-skill`,
-then overlay one of the emulator/planner variant on top. The target directory must already exist.
-
 No dependencies needed. Git clone -> run python script to copy skills in the target dir.
+
+Two build scripts exists for different types of planners, both copy the
+shared parts of the skill into a target directory as `llassembly-agentic-loop-skill`,
+then overlay one of the emulator/planner skill parts on top. 
+The target directory must already exist.
+
 
 ```bash
 python copy_asm_skill_to.py <target_dir>      # build the ASM-emulator variant skill
@@ -78,14 +81,15 @@ python copy_asm_skill_to.py <target_dir>      # build the ASM-emulator variant s
 python copy_python_skill_to.py <target_dir>   # build the Python-planner variant skill
 ```
 
-The variant you build determines which **emulator/planner** executes the plan. There are
-two, and they make different trade-offs:
 
 > **Work in progress:** this library is under active development. There may be
 > bugs and issues, use it carefully — reports in Issues are appreciated.
 
 
-### Assembly-like emulator
+The variant you build determines which **emulator/planner** executes the plan. There are
+two, and they make different trade-offs
+
+### Assembly-based planner
 
 A lightweight emulator for an assembly-like language with a deliberately
 **limited instruction set** (`MOV`, `PUSH`/`POP`, `ADD`/`SUB`, `CMP`,
@@ -107,7 +111,7 @@ quite well even on very small models like qwen3.6:30b.
 ### Python-based planner
 
 Executes **raw Python emitted by the LLM**: the plan is a small script that
-declares sub-agents and drives them from an `async def main()` entry point,
+declares sub-agents and drives them from an `def main()` entry point,
 branching with ordinary `if`/`while` and returning rich values.
 
 - **WARNING!** It runs LLM generated **real** Python code, so **it must run in a
@@ -122,7 +126,7 @@ required.
 
 ### Monty-based emulator (WIP)
 
-Current work in progress ...
+Currently work in progress ...
 
 ### Configuration
 
@@ -178,10 +182,6 @@ done:                              ; Single completion label for all exit paths
    RET                             ; Return from main execution reaching completion
 ```
 
-Each macro is an **interface only** (name, include path, objective, output
-contract); the sub-agent supplies its own implementation when run. `OUTPUT_<X>`
-slots are overwritten on every invocation, so the plan copies each result into a
-distinct register right after the call and branches on the register.
 
 ### Python variant
 
@@ -205,18 +205,18 @@ class AgentVerify(BaseSubAgent):
     existing = False
 
 
-async def main():
+def main():
     attempts = 0          # initialize the retry counter
     max_attempts = 3      # bound the loop so the plan always terminates
     succeeded = False     # track whether the goal was achieved
 
     while attempts < max_attempts:                # loop until verified or budget exhausted
         attempts += 1                             # spend one retry on this iteration
-        build_result = await AgentBuild().run()   # invoke the build sub-agent
+        build_result = AgentBuild().run()   # invoke the build sub-agent
         build_status = build_result["status"]     # capture build status before reuse
         if build_status != "ok":                  # build failed
             continue                              # retry the build on the next iteration
-        verify_result = await AgentVerify().run() # invoke the verifier sub-agent
+        verify_result = AgentVerify().run() # invoke the verifier sub-agent
         verify_passed = verify_result["all_passed"]  # capture verifier flag distinctly
         if verify_passed == "true":               # verification confirmed the goal
             succeeded = True                      # record success
@@ -227,10 +227,6 @@ async def main():
     return exit_code
 ```
 
-The plan declares sub-agents at module scope and drives them from a single
-mandatory `async def main()`. The emulator imports the module and runs `main`
-itself — the plan must not call `asyncio.run`, start threads, touch the network,
-or read/write files. Standard library only.
 
 ## Theory: agent logs, agent loops  — and where LLAssembly wins
 
@@ -242,10 +238,6 @@ them a first-class, code-owned property rather than a side effect of model
 reasoning.
 
 ### Agent logs
-
-**The theory.** A log of what an agent did is what makes a run auditable and
-recoverable. To be useful it must record the actual decisions and results — and,
-ideally, let you reconstruct the run from them.
 
 **Where LLAssembly is good at it.** Every step the loop takes is appended to a
 durable, append-only **runtime log** (JSONL, written under a file lock) that
@@ -261,9 +253,6 @@ plan that consumes it is deterministic.
 
 ### Agent loops
 
-**The theory.** Real goals can rarely be reached in one shot — they need
-build → verify → diagnose → fix → re-verify cycles that continue until the goal
-is *actually* achieved, while still being guaranteed to terminate.
 
 **Where LLAssembly is good at it.** The loop shape is encoded directly in the
 plan as ordinary code conditions rather than left to a model's judgement:

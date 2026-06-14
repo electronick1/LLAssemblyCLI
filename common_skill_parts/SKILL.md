@@ -33,7 +33,7 @@ Supporting files in this skill directory:
 On every execution, follow the printed instructions literally, then re-run the
 driver. Never decide the next step yourself — the driver decides.
 
-**The stages below are reference descriptions of what the driver may print — not
+**The stages below are example descriptions of what the driver may print — not
 a checklist to run top-to-bottom.** Each execution emits an action; 
 the only authority is what your most recent execution prints. Read it,
 do exactly what it says, then re-run the driver and read the next one.
@@ -57,7 +57,7 @@ Run this command exactly as it instructs.
 On the next execution the driver asks **where the work result should be written** and
 prints a re-run command like:
 
-> `LLASSEMBLY_LOOP_ID=… python get_next_instruction.py "<path>"`
+> `LLASSEMBLY_LOOP_ID=… python scripts/get_next_instruction.py "<path>"`
 
 Run that printed command, substituting the full directory path as a **single
 quoted positional argument**. This path is your workdir/root directory — where
@@ -77,10 +77,13 @@ always launch a sub-agent (Task tool, `general` type) to execute
 `agents/llassembly-control-flow.md`, writing the result to the path the
 driver named, assume that path already exists.
 
+Never execute `agents/llassembly-control-flow.md` instructions by yourself,
+only as a sub-agent via Task tool.
+
 The driver then tells you to re-run it with **NO output arguments** — a command
 like:
 
-> `LLASSEMBLY_LOOP_ID=… python get_next_instruction.py`
+> `LLASSEMBLY_LOOP_ID=… python scripts/get_next_instruction.py`
 
 ### Stage 4 — Generate missing sub-agents
 
@@ -90,9 +93,12 @@ that creates the definition of sub-agents for plan execution, following the inst
 prints, assuming all needed paths already exist. Run it, then re-run the driver
 with **NO output arguments**, as the printed command shows.
 
-> `LLASSEMBLY_LOOP_ID=… python get_next_instruction.py`
+> `LLASSEMBLY_LOOP_ID=… python scripts/get_next_instruction.py`
 
 This stage repeats until every invoked sub-agent has a definition.
+
+Never execute `agents/llassembly-generate-sub-agents.md` instructions by yourself,
+only as a sub-agent via Task tool.
 
 ### Stage 5 — Execute the loop
 
@@ -114,6 +120,10 @@ For each:
    resolve the next branch  — continuing, looping, or taking an error path.
 3. Repeat until the driver prints **`Execution finished. Goal is achieved.`**
 
+**Error or misbehaviour of sub-agent** - Always re-run `scripts/get_next_instruction.py`
+as instructed, do not handle sub-agent misbehaviour yourself. You only orchestrator
+and you not performing sub-agent work by yourself.
+
 ## Feeding results back correctly
 
 The emulator branches on sub-agent outputs. When you re-invoke the driver
@@ -130,7 +140,7 @@ state from reality and send the loop down the wrong branch.
    execute. The driver enforces the order; do whatever it prints.
 3. **Reuse the loop id.** Export `LLASSEMBLY_LOOP_ID` after the first execution and set
    it on every subsequent call.
-4. **Run from `scripts/`.** Printed commands assume `get_next_instruction.py` is
+4. **Run from `scripts/`.** Printed commands assume `scripts/get_next_instruction.py` is
    in the current directory.
 5. Pass sub-agent's output arguments when asked to the driver so branching stays consistent with reality.
 6. **When in doubt, re-run the driver.** It returns the next concrete action or
