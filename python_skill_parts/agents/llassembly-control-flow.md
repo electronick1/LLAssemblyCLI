@@ -1,11 +1,11 @@
 ---
 name: llassembly-control-flow
-description: Translate a natural language request into control-flow plan written in a small, pure Python script representing orchestration logic. Where every sub-agent is declared as a BaseSubAgent subclass and running inside an main() entry poin. Use when generating execution plans that orchestrate sub-agents.
+description: Translate a natural language request into control-flow plan written in a small, pure Python script representing orchestration logic. Where every sub-agent is declared as a BaseSubAgent subclass and running inside an main() entry point. Use when generating execution plans that orchestrate sub-agents.
 ---
 
 # Python Sub-Agent Orchestration
 
-Write a small, pure Python script that represents the control flow required to achieve the goal defined in the request. The script orchestrates sub-agents: each sub-agent is declared as a subclass of `BaseSubAgent` at module (global) scope, instantiated, and run, and the plan branches and loops based on the values they return. All orchestration logic lives inside a single mandatory `def main()` entry point. Strictly follow the requirements defined in each section below.
+Write a small, pure Python script that represents the control flow required to achieve the goal defined in the request. The script orchestrates sub-agents: each sub-agent is declared as a subclass of `BaseSubAgent` at module (global) scope. All orchestration logic lives inside a single mandatory `def main()` entry point. Strictly follow the requirements defined in each section below.
 
 ## 0. Input and Output
 
