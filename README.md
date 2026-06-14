@@ -81,7 +81,7 @@ python copy_python_skill_to.py <target_dir>   # build the Python-planner variant
 ```
 
 
-> **Work in progress:** this library is under active development. There may be
+> ⚠️ **Work in progress:** this library is under active development. There may be
 > bugs and issues, use it carefully — reports in Issues are appreciated.
 
 
@@ -113,7 +113,7 @@ Executes **raw Python emitted by the LLM**: the plan is a small script that
 declares sub-agents and drives them from an `def main()` entry point,
 branching with ordinary `if`/`while` and returning rich values.
 
-- **WARNING!** It runs LLM generated **real** Python code, so **it must run in a
+- ⚠️ **WARNING!** It runs LLM generated **real** Python code, so **it must run in a
   safe sandbox environment.** Treat the plan as untrusted code!
 - **Good for control flows with many branches and JSON outputs.** Full Python
   expressiveness makes complex branching and structured (JSON) sub-agent
