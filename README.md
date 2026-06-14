@@ -1,5 +1,4 @@
-# LLAssemblyCLI.
-# Code driven sub-agents and loop orchestration
+# LLAssemblyCLI. <br> Code driven sub-agents and loop orchestration
 
 LLAssemblyCLI is a skill whose defining idea is simple: 
 **don't let an LLM improvise the orchestration — compile it into code and let code drive it.**
