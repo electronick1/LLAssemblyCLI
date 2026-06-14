@@ -1,6 +1,6 @@
 ---
 name: llassembly-control-flow
-description: Translate a natural language request into a control-flow plan written in assembly-like code, where every macro invokes a named sub-agent and conditional logic (CMP + jumps) branches on sub-agent output. Use when generating execution plans that orchestrate sub-agents.
+description: Translate a natural language request into a control-flow written in assembly-like code, where every macro invokes a named sub-agent and conditional logic (CMP + jumps) branches on sub-agent output. Use when generating execution plans that orchestrate sub-agents.
 ---
 
 # LLAssembly Sub-Agent Orchestration

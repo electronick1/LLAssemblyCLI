@@ -81,7 +81,7 @@ python copy_python_skill_to.py <target_dir>   # build the Python-planner variant
 ```
 
 
-> ⚠️ **Work in progress:** this library is under active development. There may be
+> **Work in progress:** this library is under active development. There may be
 > bugs and issues, use it carefully — reports in Issues are appreciated.
 
 
@@ -90,22 +90,22 @@ two, and they make different trade-offs
 
 ### Assembly-based planner
 
-A lightweight emulator for an assembly-like language with a deliberately
+Executes Assembly-like plan emitted by LLM in a lightweight emulator with a deliberately
 **limited instruction set** (`MOV`, `PUSH`/`POP`, `ADD`/`SUB`, `CMP`,
 conditional jumps, `CALL`/`RET`, and a handful of macro/`db` directives). Because
 the plan can only express this tiny, well-defined set of operations:
 
-- **No extra hardering layers required.** The emulator can only do what its
+- **No extra hardering layers required.** The emulator (see emulator.py) can only do what its
   instruction table allows — there is no files, syscalls or internet related
   instructions; mainly: CMP, jumps, numbers/strings manipulation, that are emulated
-  in a limited and controlled way, see: `asm_skill_parts/agents/llassembly-control-flow.md`
-  for more details.
+  in a limited and controlled way, only to connect sub-agents together,
+  see: `asm_skill_parts/agents/llassembly-control-flow.md` for more details.
 - **Plans stay stable even on small models.** The narrow grammar is easy
   for weak models to emit correctly and to keep consistent across a long loop.
 - Emulator is based on [LLAssembly](https://github.com/electronick1/LLAssembly) project.
 
-This plan type shines when you want to run without extra infrastructure, and it's performs
-quite well even on very small models like qwen3.6:30b.
+This plan type shines when you want to run CLI based skills without extra infrastructure,
+and it performs quite well even on very small models like qwen3.6:30b.
 
 ### Python-based planner
 
@@ -113,8 +113,10 @@ Executes **raw Python emitted by the LLM**: the plan is a small script that
 declares sub-agents and drives them from an `def main()` entry point,
 branching with ordinary `if`/`while` and returning rich values.
 
-- ⚠️ **WARNING!** It runs LLM generated **real** Python code, so **it must run in a
-  safe sandbox environment.** Treat the plan as untrusted code!
+- **WARNING!** Python-based planner runs LLM generated Python code,
+  **it must run in a safe sandboxed environment.** Treat the python-based planner code as untrusted code! 
+  Running untrusted code is never safe — and you solely responsible for securing the
+  environment in which it executes.
 - **Good for control flows with many branches and JSON outputs.** Full Python
   expressiveness makes complex branching and structured (JSON) sub-agent
   results natural to handle.
@@ -185,9 +187,6 @@ done:                              ; Single completion label for all exit paths
 ### Python variant
 
 ```python
-from sub_agents import BaseSubAgent
-
-
 # Declare the build sub-agent (interface only — no behavior implemented).
 class AgentBuild(BaseSubAgent):
     name = "build"

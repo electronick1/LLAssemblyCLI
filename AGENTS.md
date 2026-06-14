@@ -48,20 +48,6 @@ Key consequences for editing:
 - Loop state lives at `${LLASSEMBLY_LOOP_PATH:-/tmp}/llassembly/<LLASSEMBLY_LOOP_ID>/`
   (`runtime.log` + `plan.llassembly`). `runtime.log` is append-only JSONL under an flock.
 
-## Verifying changes
-
-There is no test suite, linter, or CI. Each `emulator.py` has a `__main__` self-test:
-
-```bash
-python python_skill_parts/scripts/emulator.py    # prints declared agents + a sub-agent round-trip
-python asm_skill_parts/scripts/emulator.py
-```
-
-Run these after touching an emulator. Targets Python 3.14 (uses PEP 695 generics / `Self`;
-forward-referenced annotations rely on deferred evaluation). After a real edit, also build to a
-temp dir and confirm the overlay produced both `scripts/emulator.py` and
-`scripts/get_next_instruction.py`.
-
 ## Conventions / gotchas
 
 - Pure standard library only. No third-party deps anywhere, including in any generated plans

@@ -1,121 +1,82 @@
 ---
 name: llassembly-control-flow
-description: Translate a natural language request into control-flow plan written in a small, pure Python script representing orchestration logic. Where every sub-agent is declared as a BaseSubAgent subclass and running inside an main() entry point. Use when generating execution plans that orchestrate sub-agents.
+description: Write a small, pure Python script that orchestrates sub-agents to achieve a natural language request, where every sub-agent is declared as a BaseSubAgent subclass and run inside a single main() entry point.
 ---
 
 # Python Sub-Agent Orchestration
 
-Write a small, pure Python script that represents the control flow required to achieve the goal defined in the request. The script orchestrates sub-agents: each sub-agent is declared as a subclass of `BaseSubAgent` at module (global) scope. All orchestration logic lives inside a single mandatory `def main()` entry point. Strictly follow the requirements defined in each section below.
+## Overview
+
+Write a small, pure Python script that represents the control flow required to achieve the goal in the request. Each sub-agent is declared as a `BaseSubAgent` subclass at module (global) scope, instantiated, and run; the script branches and loops on the values they return. All orchestration lives inside a single mandatory `def main()`. Follow the requirements in each section below.
 
 ## 0. Input and Output
 
-**Input:**
-A natural language request to translate into an orchestration script.
+**Input:** A natural language request to translate into an orchestration script.
 
-**Output:**
-A valid, complete Python script based on the definitions in sections [1. Core Requirements], [2. Script Guidelines], and [3. Sub-Agent Definition] that represents orchestration control-flow plan.
+**Output:** A single Python script (syntactically valid Python) to orchestrate sub-agents, nothing but `Agent*` subclasses and a single `main()` that only *dispatches* to them (see the OUTPUT CONTRACT above for the exact format).
 
 ## 1. Core Requirements
 
-1.1. The control flow must keep working until the goal is **actually achieved**, not merely until each step has run once. Prefer loops and conditionals that retry, branch, and re-check over straight-line, run-once sequences. See section [4. Loops, Conditionals, and Verification] for the required patterns.
-1.2. Only the language features listed in section [2.1 Allowed Constructs] may be used in the script.
-1.3. Declare and instantiate each sub-agent needed for the control flow as a `BaseSubAgent` subclass (interface only; never implement its behavior). Strictly follow section [3. Sub-Agent Definition] when doing so.
+1.1. The control flow must keep working until the goal is **actually achieved**, not merely until each step has run once. Prefer loops and conditionals that retry, branch, and re-check over straight-line sequences (see section [4]).
+1.2. Only the constructs listed in section [2.1] may be used.
+1.3. Declare and run every sub-agent the control flow needs as a `BaseSubAgent` subclass — interface only, never its behavior (see section [3]).
 1.4. Branch and loop using plain Python conditionals (`if`/`elif`/`else`) and loops (`while`/`for`).
-1.5. Never write comments that describe work to be implemented later. Comments must only annotate existing code.
-1.6. Never use placeholders. Never produce simplified or demo implementations. Produce a full, complete script that satisfies all defined constraints.
-1.7. This script runs in a custom emulator. The emulator behaves according to the rules defined in this document.
-1.8. The script **must** define a single `def main()` function as its mandatory entry point. All orchestration (instantiating and running sub-agents, branching, looping) lives inside `main`. The emulator imports the module and then drives `main` itself; the script itself must **not** call `main()`.
-1.9. Every sub-agent instantiated and run in the script must also be declared as described in section [3. Sub-Agent Definition].
-1.10. The script must read as a plan that orchestrates sub-agent execution. The sub-agents themselves provide the actual implementation.
+1.5. Comments must only annotate existing code. Never write comments describing work to implement later.
+1.6. Never use placeholders, simplified, or demo implementations. Never define or import `BaseSubAgent` — the runtime supplies it (see section [3.2]); defining or importing it shadows the runtime class and breaks execution.
+1.7. The script runs in a custom emulator that drives an **execution loop**, re-invoking the script's sub-agents one at a time and carrying state between steps.
+1.8. The script **must** define a single `def main()` as its mandatory entry point; all orchestration lives inside it. The emulator imports the module and drives `main` itself — the script must **not** call `main()`.
+1.9. The Python script must read as orchestration logic in executable python syntax that dispatches to sub-agents. When invoked the sub-agents provide the actual work deligated to them.
 
 ## 2. Script Guidelines
 
 ### 2.1. Allowed Constructs
 
-- Only the **Python standard library** is allowed. Do not import third-party packages.
-- **No network calls** of any kind.
+- Only the **Python standard library** — no third-party packages, no packages outside Python builtins.
+- **No network calls.**
 - **No file system access** (no reading, writing, opening, or deleting files).
-- **No threading, multiprocessing, or any other form of concurrency you introduce yourself.** You may call sub-agents (using .run()) inside `def main()` (see section [3.4]), but you must not spawn threads, processes, or event loops, and you must not call `main()`  — the emulator starts and drives `main` for you.
-- The script must be **pure, simple, script-like logic**: variable assignments, conditionals (`if`/`elif`/`else`), loops (`while`/`for`), comparisons, arithmetic, and running sub-agents. Keep it at the level of a straightforward control-flow script.
+- **No concurrency you introduce** (no threads, processes, or event loops). You may run sub-agents via `.run()` inside `def main()` (see section [3.4]), but per section [1.8] never call `main()` yourself.
+- Keep it **minimal, ordinary Python**: variable assignments, conditionals, loops, comparisons, arithmetic, and running sub-agents. Every line must be syntactically valid Python — never pseudocode or a prose description of a step.
+- No Python typing required.
 
 ### 2.2. State
 
 - Hold sub-agent results in ordinary local variables.
-- A sub-agent's result may be a string (including json string) or a number, so compare against the matching type.
-- Each time a sub-agent runs it returns a fresh result. Capture the result into a distinct, clearly named variable right after the .run() that produced it, then branch on that variable. Reusing the same variable name across different sub-agents overwrites the earlier value, so choose names that keep the values you still need alive across later invocations.
+- A result may be a string (including a JSON string) or a number, so compare against the matching type.
+- Each `.run()` returns a fresh result. Capture it into a distinct, clearly named variable right after the call that produced it, then branch on that variable. Reusing one name across different sub-agents overwrites earlier values — name them so values you still need stay alive across later invocations.
 
 ## 3. Sub-Agent Definition
 
-Declare every sub-agent that the control flow invokes by subclassing `BaseSubAgent` at module (global) scope. This is a **plan-only** task: the subclass is an interface/contract (name, objective, and expected outputs) that wires the sub-agent into the orchestration. Do **not** implement the sub-agent's behavior or author its internal logic — the sub-agent provides its own implementation when run.
-The sub-agents are run, in the order and control flow encoded by the orchestration, by an **execution loop** that iterates until the caller's goal is met, carrying state between steps.
+Declare every sub-agent the control flow invokes as a `class AgentX(BaseSubAgent):` block at module (global) scope — real Python `class` statements, never a prose list of names and objectives. The class body sets four class attributes (`name`, `objective`, `output_spec`, `existing`) that wire the sub-agent into the orchestration. Do **not** implement the sub-agent's behavior — it provides its own implementation when run, driven by the emulator execution loop.
 
-The example of sub-agent interface defined as the following abstract class:
-```python
-from abc import ABC, abstractmethod
-from typing import Any, ClassVar
+The runtime-provided `BaseSubAgent` already offers the contract below. **This is documentation of the provided class, not code to write, import, or override** — your subclasses only set the four class attributes:
 
-
-class BaseSubAgent(ABC):
-    """Abstract base for all sub-agents declared in the control-flow script.
-
-    Sub-classes supply only the contract attributes (name, objective,
-    output_spec, existing); they do **not** implement the agent's behavior
-    — the execution loop / external tool invokes and runs them.
-    """
-
-    # -- class-level contract attributes (filled by each sub-class) ----------
-    name: ClassVar[str]           # short, unique identifier for this agent
-    objective: ClassVar[str]      # one-sentence goal of the agent
-    output_spec: ClassVar[dict[str, str]]  # output-key → human-readable description
-    existing: ClassVar[bool]       # True only if a runtime-registered agent by this name exists
-
-    # -- required abstract method for any concrete runner ---------------------
-    @abstractmethod
-    def run(self) -> dict[str, Any]:
-        """Execute this sub-agent and return its result.
-
-        Returns
-        -------
-        dict[str, Any] # output-key: value
-            Where Any is a string (including JSON-encoded), a number, list or a dict mapping  per `output_spec`.
-        """
+```
+BaseSubAgent                       # provided in your globals; you only subclass it
+  class attributes  (you set these on each subclass)
+    name: str                      # short, unique identifier
+    objective: str                 # one-sentence goal
+    output_spec: dict[str, str]    # output key -> human-readable description
+    existing: bool                 # True only if a runtime-registered agent by this name exists
+  method  (provided by the runtime — never write or override it)
+    run() -> dict[str, str | int]  # one entry per output_spec key; value is str (incl. JSON string) or int
 ```
 
-Follow these requirements:
+3.1. Determine which sub-agents the control flow needs.
+    3.1.1. Learn what agents and skills are available from your **system prompt** and **session context** — e.g in `<agents>` and `<skills>` blocks. Do not read configuration files.
+    3.1.2. This catalog sets the `existing` flag (section [3.3]): a sub-agent whose exact name appears there is `existing=True`; anything you introduce or infer is `existing=False`. A wrongly-`True` agent leaves the loop pointing at a definition that was never generated; an `existing=False` agent triggers generation of its definition file.
 
-3.1. Determine which sub-agents are needed in the control flow to fulfill the goal.
-    3.1.1 Learn what agents and skills are available from current **system prompt** and **session context**.
-          Do not read configuration files.  To enumerate what is actionable, read your system prompt for
-          injected `<agents>` and `<skills>` blocks — that IS the catalog.
+3.2. **The runtime adds `BaseSubAgent` into the script's global namespace before running the script** — there is nothing to import. Simply reference and subclass it. Do not write `class BaseSubAgent(...)` or any `import` for it or it's parts.
 
-3.2. **Import `BaseSubAgent`** from the `sub_agents` module. This is the only symbol you import from `sub_agents`:
-
-```python
-from sub_agents import BaseSubAgent
-```
-
-3.3. **Declare each sub-agent as a subclass of `BaseSubAgent` at global scope** (never inside `main` or any other function). The class name must start with `Agent` followed by a CamelCase descriptive name. The contract is supplied as **class attributes**:
+3.3. **Declare each sub-agent as a `class AgentX(BaseSubAgent):` block at global scope** (never inside `main` or another function). The class name starts with `Agent` followed by a CamelCase descriptor. Inside the class body set:
 
 - `name` (str): the sub-agent's short name.
-- `objective` (str): a one-sentence goal or objective for the sub-agent.
-- `output_spec` (dict[str, str]): the **output contract** — a mapping from each output key to a human-readable description of what that output means. Use at most ten outputs. This describes what the sub-agent is expected to return so the control flow can branch on it.
-- `existing` (bool): set to `True` **only** when a sub-agent with that exact name is already registered and available in the current runtime's own set of defined agents — that is, an agent the running tool can actually invoke by that name. Set to `False` in every other case, including any sub-agent you are introducing, inferring, or that is not confirmed to exist in the current runtime's defined agents. `existing=False` only references where the sub-agent's specification belongs; it does **not** mean you write that specification here. Defining and implementing the sub-agent is out of scope for this plan.
+- `objective` (str): a one-sentence goal.
+- `output_spec` (dict[str, str]): the **output contract** — each output key mapped to a human-readable description so the control flow can branch on it. At most ten outputs.
+- `existing` (bool): `True` **only** when a sub-agent of that exact name is already registered and invocable in the current runtime; `False` in every other case, including anything you introduce or infer. `existing=False` only references where the sub-agent's specification belongs — defining it is out of scope for this script.
 
-Example declaration (interface only — no behavior implemented):
-
-```python
-class AgentBuild(BaseSubAgent):
-    name = "build"
-    objective = "Build the project artifact from source"
-    output_spec = {"status": 'status: "ok" on success or "error" on failure'}
-    existing = False
-```
-
-3.4. **Run the sub-agent** by instantiating its class with **no arguments** and call it's  `run` method. `run` must be called from within the `def main()` entry point. The call returns the sub-agent's actual result (a string, a number, or a mapping, per its `output_spec`):
+3.4. **Run a sub-agent** by instantiating its class with no arguments and calling `run()` from within `main()`. The call returns the sub-agent's actual result per its `output_spec`:
 
 ```python
-from sub_agents import BaseSubAgent
-
 class AgentBuild(BaseSubAgent):
     name = "build"
     objective = "Build the project artifact from source"
@@ -123,46 +84,30 @@ class AgentBuild(BaseSubAgent):
     existing = False
 
 def main():
-    result = AgentBuild().run()   # invoke the sub-agent and capture its result
+    build_result = AgentBuild().run()   # invoke and capture the result
 ```
 
-The emulator imports the module and drives `main`; do not call `main()` yourself, and do not introduce threads, processes, or event loops (see section [2.1]).
-
-3.5. Capture each result you need into a distinct, clearly named local variable right after the .run() that produced it, then branch on that variable (see section [2.2]).
-
-3.6. Each declaration must be a complete, well-formed **interface** — a real name, objective, and accurate output contract — not a placeholder, dummy, or demo. Completeness here means a faithful interface the execution loop can dispatch to; it does **not** mean implementing the sub-agent's work.
-
-3.7. Sub-agents that perform real work should expose at least a status output  so the control flow can branch on the result instead of assuming success.
-
-3.8. Consult the matching reference for role-specific guidance:
-- For workers that implement or modify code, run tests/builds, verify a result, or diagnose a
-  failure → `references/worker-sub-agents.md`.
-- For read-only research/exploration workers that gather information without changing anything
-  → `references/research-sub-agents.md`.
+3.5. Capture each result per section [2.2], then branch on it.
+3.6. Each declaration must be a complete, well-formed interface — a real name, objective, and accurate output contract — not a placeholder or demo. Completeness means a faithful interface the loop can dispatch to, not implemented work.
+3.7. Sub-agents that perform real work should expose at least a status output so the control flow can branch instead of assuming success.
+3.8. Consult the matching reference before declaring a worker:
+- Workers that implement/modify code, run tests/builds, verify, or diagnose → `references/worker-sub-agents.md`.
+- Read-only research/exploration workers → `references/research-sub-agents.md`.
+3.9. Declare outputs in `output_spec` that actually used during orchestration.
 
 ## 4. Loops, Conditionals, and Verification
 
-The execution loop re-invokes sub-agents one at a time, carrying state (local variables) between steps.
+The execution loop re-invokes sub-agents one at a time, carrying local-variable state between steps.
 
-4.1. **Prefer loops and conditionals over straight-line sequences.** Do not assume a sub-agent succeeds. After every sub-agent that can fail, check its status output and branch.
+4.1. **Prefer loops and conditionals over straight-line sequences.** Do not assume success — after every sub-agent that can fail, check its status output and branch.
+4.2. **Branch on results.** On success continue; on failure retry the step or run a recovery/fix sub-agent.
+4.3. **Add a verification step when the goal needs confirming.** When the request implies a checkable outcome (code that must run, endpoints that must respond, tests that must pass), declare a dedicated verifier sub-agent whose outputs report whether the goal is met.
+4.4. **Loop until verified, not until run-once.** After the work sub-agents run, run the verifier: if it reports success, finish; if failure, loop back to re-run the work (optionally a targeted fix sub-agent) and verify again.
+4.5. **Bound the loop.** Every retry loop needs a counter (e.g. `attempts = 0`): initialize it before the loop, increment each iteration, and compare against a maximum to break out to an abort path. Use one counter per loop; give genuinely independent (e.g. nested) loops their own named counters. This guarantees termination and respects the emulator's execution limit.
 
-4.2. **Branch on results.** When a step succeeds, continue; when it fails, either retry the step or run a recovery/fix sub-agent.
-
-4.3. **Add a verification step when the goal needs confirming.** When the request implies a checkable outcome (code that must run, endpoints that must respond, a file that must contain something, tests that must pass), declare a dedicated verifier sub-agent and run it in the plan. Its declared outputs must report whether the goal is met.
-
-4.4. **Loop until verified, not until run-once.** Structure the plan so that after the work sub-agents run, the verifier runs, and:
-- if the verifier reports success, finish;
-- if it reports failure, loop back to re-run the work (optionally a targeted fix sub-agent) and verify again.
-
-4.5. **Bound the loop.** Initialize a retry counter (for example `attempts = 0`) per sub-agent or/and per group of sub-agents, increment it on each iteration, and compare it against a maximum so the loop breaks out to an abort/give-up path. This guarantees the plan terminates even when the goal cannot be reached, and respects the emulator's execution limit.
-
-Example loop pattern (declare the sub-agent subclasses at global scope first, then the `def main()` orchestration that captures each result into a clearly named variable right after the call that produced it):
+Example pattern — declare subclasses at global scope, then a `def main()` that captures each result into a clearly named variable right after its call:
 
 ```python
-from sub_agents import BaseSubAgent
-
-
-# Declare the build sub-agent (interface only — no behavior implemented).
 class AgentBuild(BaseSubAgent):
     name = "build"
     objective = "Build the project artifact from source"
@@ -170,7 +115,6 @@ class AgentBuild(BaseSubAgent):
     existing = False
 
 
-# Declare the verifier sub-agent (interface only — no behavior implemented).
 class AgentVerify(BaseSubAgent):
     name = "verify"
     objective = "Verify the built artifact passes all checks"
@@ -179,23 +123,20 @@ class AgentVerify(BaseSubAgent):
 
 
 def main():
-    attempts = 0          # initialize the retry counter
-    max_attempts = 3      # bound the loop so the plan always terminates
-    succeeded = False     # track whether the goal was achieved
+    attempts = 0
+    max_attempts = 3
+    succeeded = False
 
     while attempts < max_attempts:        # loop until verified or budget exhausted
-        attempts += 1                     # spend one retry on this iteration
-        build_result = AgentBuild().run()   # invoke the build sub-agent
-        build_status = build_result["status"]     # capture build status before reuse
-        if build_status != "ok":                  # build failed
-            continue                              # retry the build on the next iteration
-        verify_result = AgentVerify().run() # invoke the verifier sub-agent
-        verify_passed = verify_result["all_passed"]  # capture verifier flag distinctly
-        if verify_passed == "true":               # verification confirmed the goal
-            succeeded = True                      # record success
-            break                                 # the goal is achieved; stop looping
-        # verification failed; loop back to rebuild and verify again
+        attempts += 1
+        build_status = AgentBuild().run()["status"]   # capture build status
+        if build_status != "ok":
+            continue                                  # retry the build
+        verify_passed = AgentVerify().run()["all_passed"]  # capture verifier flag
+        if verify_passed == "true":
+            succeeded = True
+            break                                     # goal achieved
+        # verification failed; loop back to rebuild and verify
 
-    exit_code = 0 if succeeded else 1     # zero on success, one when the budget ran out
-    return exit_code
+    return 0 if succeeded else 1          # zero on success, one when budget ran out
 ```

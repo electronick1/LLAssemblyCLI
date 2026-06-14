@@ -1,6 +1,6 @@
 ---
 name: llassembly-generate-sub-agents
-description: Generate one worker sub-agent definition file that the control-flow plan invokes by name, so the loop can achieve its goal. Used as one step of the execution loop, invoked once per missing worker sub-agent. Before creating anything, this agent REQUIRES checking whether a suitable worker sub-agent already exists and reusing it instead of creating a new one.
+description: Generate one worker sub-agent definition file that the control-flow plan invokes by name, so the loop can achieve its goal. Used as one step of the execution loop, invoked once per missing worker sub-agent.
 ---
 
 # Generating a Worker Sub-Agent
@@ -109,10 +109,10 @@ and a `description` covering what the worker sub-agent does and when the loop sh
 responsibility toward the goal. Never inline this behavior into the control-flow — it lives only
 in the worker sub-agent file.
 
-5.3. **Outputs the loop branches on.** Document the `OUTPUT_<X>` values the worker sub-agent
-reports back, and make them machine-comparable so the control-flow's conditional decisions
-resolve deterministically. For verifier /goal-checker worker sub-agents, describe the success
-value that lets the execution loop take its exit branch, so the loop can  terminate.
+5.3. **Outputs the loop branches on.** Document the named outputs the worker sub-agent reports
+back — and make them machine-comparable so the control-flow's conditional decisions resolve
+deterministically. For verifier/goal-checker worker sub-agents, describe the success value that
+lets the execution loop take its exit branch, so the loop can terminate.
 
 ## 6. Invariants to enforce before finishing
 
