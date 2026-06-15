@@ -35,11 +35,11 @@ On every execution, you must follow the printed instructions literally,
 then re-run the driver. Never decide the next step yourself — the driver decides.
 
 **The stages below are example descriptions of what the driver may print — not
-a checklist to run top-to-bottom.** Each execution emits an action; 
-the only authority is what your most recent execution prints. Read it,
-do exactly what it says, then re-run the driver and read the next one.
-Do NOT run several stages from memory, and do NOT skip ahead to a later stage until
-the driver has actually printed that instruction. Stages can repeat, branch, or be
+a checklist to run top-to-bottom.** Each invocation of scripts/get_next_instruction.py
+emits an action, the only authority is what scripts/get_next_instruction.py most recent
+invocation prints. Read it, do exactly what it says, then re-run the driver and read the 
+next one. Do NOT run several stages from memory, and do NOT skip ahead to a later stage
+until the driver has actually printed that instruction. Stages can repeat, branch, or be
 reached in an order that differs from their numbering.
 
 ### Stage 1 — Acquire loop id:
@@ -115,9 +115,6 @@ For each:
    pass NO output arguments; if it printed three, pass three values in that order.
    Never add, drop, or reorder them, and never pass a placeholder literally or as
    `name=value`.
-
-   The driver records a `sub-agent-result` entry and uses those outputs to
-   resolve the next branch  — continuing, looping, or taking an error path.
 3. Repeat until the driver prints **`Execution finished. Goal is achieved.`**
 4. On this stage you only allowed to re-run `scripts/get_next_instruction.py` and
    and follow it instructions until Goal is reached.
@@ -125,8 +122,8 @@ For each:
    until the Goal is reached.
 
 **Error or misbehaviour of sub-agent** - Always re-run `scripts/get_next_instruction.py`
-as instructed, do not handle sub-agent misbehaviour yourself. You only orchestrator
-and you not performing sub-agent work by yourself.
+as instructed, do not handle sub-agent misbehaviour yourself. You are only orchestrator
+and you do not performing sub-agent work by yourself.
 
 ## Feeding results back correctly
 
