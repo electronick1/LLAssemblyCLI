@@ -81,7 +81,7 @@ python copy_python_skill_to.py <target_dir>   # build the Python-planner variant
 ```
 
 
-> **Work in progress:** this library is under active development. There may be
+> ⚠️ **Work in progress:** this library is under active development. There may be
 > bugs and issues, use it carefully — reports in Issues are appreciated.
 
 
@@ -105,7 +105,7 @@ the plan can only express this tiny, well-defined set of operations:
 - Emulator is based on [LLAssembly](https://github.com/electronick1/LLAssembly) project.
 
 This plan type shines when you want to run CLI based skills without extra infrastructure,
-and it performs quite well even on very small models like qwen3.6:30b.
+and it performs quite well even on very small models like qwen3.6:35b.
 
 ### Python-based planner
 
@@ -113,7 +113,7 @@ Executes **raw Python emitted by the LLM**: the plan is a small script that
 declares sub-agents and drives them from an `def main()` entry point,
 branching with ordinary `if`/`while` and returning rich values.
 
-- **WARNING!** Python-based planner runs LLM generated Python code,
+- ⚠️ **WARNING!** The Python-based planner runs LLM generated Python code,
   **it must run in a safe sandboxed environment.** Treat the python-based planner code as untrusted code! 
   Running untrusted code is never safe — and you solely responsible for securing the
   environment in which it executes.
@@ -231,13 +231,13 @@ def main():
 Agent logs, loops, and harnesses are the three things any serious agentic system
 has to get right. They are also exactly the things the orchestrator-agent
 pattern handles weakly, because all three depend on a control flow that is
-stable, inspectable, and repeatable. LLAssembly is built around making each of
+stable, inspectable, and repeatable. LLAssemblyCLI is built around making each of
 them a first-class, code-owned property rather than a side effect of model
 reasoning.
 
 ### Agent logs
 
-**Where LLAssembly is good at it.** Every step the loop takes is appended to a
+**Where LLAssemblyCLI is good at it.** Every step the loop takes is appended to a
 durable, append-only **runtime log** (JSONL, written under a file lock) that
 records what was asked, which sub-agent ran, and what it returned. Because the
 control flow is *code* and every sub-agent result is logged, the log is not a
@@ -246,13 +246,13 @@ to the plan reconstructs the *exact same state*, so a run can be audited
 step-by-step, replayed deterministically, or resumed after a crash without
 starting over and drifting onto a different path. With an orchestrator agent the
 "log" is just chat history, and replaying it does not reproduce the same
-decisions; LLAssembly turns the log into a source of truth precisely because the
+decisions; LLAssemblyCLI turns the log into a source of truth precisely because the
 plan that consumes it is deterministic.
 
 ### Agent loops
 
 
-**Where LLAssembly is good at it.** The loop shape is encoded directly in the
+**Where LLAssemblyCLI is good at it.** The loop shape is encoded directly in the
 plan as ordinary code conditions rather than left to a model's judgement:
 
 - **Verify, don't assume.** After work that can fail, the plan checks a status
@@ -263,9 +263,4 @@ plan as ordinary code conditions rather than left to a model's judgement:
 - **Bounded by construction.** A retry counter compared against a maximum
   guarantees termination even when the goal cannot be reached, and respects the
   emulator's instruction limit.
-
-Because these are code conditions, the loop's progress and termination
-guarantees are explicit and repeatable — LLAssembly makes "keep going until
-verified, but never forever" a property of the plan, not a behavior you hope the
-model remembers across a long context.
 
