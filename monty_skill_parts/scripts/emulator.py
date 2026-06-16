@@ -99,8 +99,7 @@ class ScriptRunnner:
                     for kw in ["name", "objective", "output_spec", "existing"]:
                         if kw in monty_result.kwargs:
                             args.append(monty_result.kwargs[kw])
-                    name, objective, output_spec, existing = args
-                    self.setup_sub_agent_hook(name, objective, output_spec, existing)
+                    self.setup_sub_agent_hook(*args)
                     monty_result = monty_result.resume({"return_value": None})
                 elif monty_result.function_name == "run_sub_agent":
                     (name,) = monty_result.args
@@ -211,7 +210,6 @@ class Emulator:
                 continue
 
             sub_agent_name, hook = item
-            print(self._runner._sub_agents)
             sub_agent = self._runner._sub_agents[sub_agent_name]
             sub_agent_context = SubAgentContext(
                 sub_agent,
