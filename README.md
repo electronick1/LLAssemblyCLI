@@ -226,7 +226,7 @@ and it performs quite well even on very small models like qwen3.6:35b.
 ### Monty-based planner variant
 
 Uses the same Python plan language as the Python variant, but replaces raw
-`exec()` with [`pydantic_monty`](https://github.com/pydantic/pydantic-monty) as
+`exec()` with [`pydantic_monty`](https://github.com/pydantic/monty) as
 the execution engine.
 
 
