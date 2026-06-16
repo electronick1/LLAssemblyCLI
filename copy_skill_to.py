@@ -2,7 +2,7 @@
 
 """
 Script to copy common_skill_parts to a specified directory as llassembly-agentic-loop-skill
-and overlay python_skill_parts on top of it.
+and overlay a chosen variant on top of it.
 """
 
 import argparse
@@ -11,10 +11,21 @@ from pathlib import Path
 
 SKILL_DIRNAME = "llassembly-agentic-loop-skill"
 
+VARIANT_BASE_DIR = {
+    "llassembly": "asm_skill_parts",
+    "python": "python_skill_parts",
+    "monty": "monty_skill_parts",
+}
+
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Copy common_skill_parts and overlay python_skill_parts to a target directory."
+        description="Copy common_skill_parts and overlay a variant to a target directory."
+    )
+    parser.add_argument(
+        "variant",
+        choices=VARIANT_BASE_DIR.keys(),
+        help="The variant to overlay (llassembly, python, monty)",
     )
     parser.add_argument(
         "target_directory",
@@ -26,15 +37,17 @@ def main():
     # Get script directory and source paths
     script_dir = Path(__file__).parent.resolve()
     common_skill_parts = script_dir / "common_skill_parts"
-    python_skill_parts = script_dir / "python_skill_parts"
+    variant_base_dir = script_dir / VARIANT_BASE_DIR[args.variant]
     target_dir = Path(args.target_directory).resolve()
 
     # Validate source directories exist
     if not common_skill_parts.is_dir():
         parser.error(f"common_skill_parts directory not found at {common_skill_parts}")
 
-    if not python_skill_parts.is_dir():
-        parser.error(f"python_skill_parts directory not found at {python_skill_parts}")
+    if not variant_base_dir.is_dir():
+        parser.error(
+            f"{VARIANT_BASE_DIR[args.variant]} directory not found at {variant_base_dir}"
+        )
 
     # Validate target directory exists
     if not target_dir.is_dir():
@@ -58,10 +71,10 @@ def main():
     print(f"Copying common_skill_parts to {dest_dir}...")
     shutil.copytree(common_skill_parts, dest_dir)
 
-    # Overlay python_skill_parts
-    print("Overlaying python_skill_parts...")
-    for item in python_skill_parts.rglob("*"):
-        dest_item = dest_dir / item.relative_to(python_skill_parts)
+    # Overlay variant
+    print(f"Overlaying {VARIANT_BASE_DIR[args.variant]}...")
+    for item in variant_base_dir.rglob("*"):
+        dest_item = dest_dir / item.relative_to(variant_base_dir)
         if item.is_dir():
             dest_item.mkdir(parents=True, exist_ok=True)
         elif item.is_file():

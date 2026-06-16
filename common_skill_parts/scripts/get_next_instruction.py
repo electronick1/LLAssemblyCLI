@@ -131,6 +131,7 @@ class Config:
         )
         assert workdir_base_path
         workdir_path = Path(workdir_base_path).resolve() / f"llassembly/{loop_id}"
+
         return cls(
             loop_id=loop_id,
             workdir_base_path=Path(workdir_base_path).resolve(),
@@ -327,7 +328,9 @@ def _try_step_run_init_sub_agents(
     emulator = _import_emulator().Emulator.from_code(plan_path.read_text())
     for sub_agent in emulator.get_sub_agents().values():
         if sub_agent.include_path.startswith("general/"):
-            sub_agent_path = config.workdir_path / "agents" / Path(f"{sub_agent.name}.md")
+            sub_agent_path = (
+                config.workdir_path / "agents" / Path(f"{sub_agent.name}.md")
+            )
             if not sub_agent_path.exists():
                 next_command = NEXT_COMMAND_GENERATE_SUB_AGENT.format(
                     sub_agent_path=sub_agent_path,
@@ -411,7 +414,9 @@ def _step_execute_llassembly(
 
                 next_command_text = NEXT_COMMAND_EXECUTE_SUB_AGENT.format(
                     agent_name=agent.name,
-                    agent_path=config.workdir_path / "agents" / Path(f"{agent.name}.md"),
+                    agent_path=config.workdir_path
+                    / "agents"
+                    / Path(f"{agent.name}.md"),
                     objective=objective,
                     output_desc=output_desc,
                     output_args=output_keys_str,
