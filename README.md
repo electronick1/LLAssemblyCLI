@@ -1,7 +1,24 @@
-# LLAssemblyCLI. <br> Code driven sub-agents and loop orchestration
+# LLAssemblyCLI.
+
+### Reliable, resumable, code-driven orchestration for sub-agents and agentic-loops
 
 LLAssemblyCLI is a skill whose defining idea is simple: 
-**don't let an LLM improvise the orchestration — compile it into code and let code drive it.**
+**don't let an LLM improvise the orchestration — compile the orchestration plan into the code and let code drive it.**
+
+1. **LLM compiles** the goal into an explicit control-flow program (`plan.llassembly`) — once.
+2. **Runs** that program with a deterministic code driver that dispatches sub-agents one at a
+   time, feeds their results back into the program's state, and lets **code** decide the next
+   branch, retry, or loop — never an LLM.
+3. **Persists** every step to an append-only log so the loop can be paused, inspected, and
+   resumed after a crash without losing its place.
+
+LLAssemblyCLI ships with 3 variants of code-driven control-flows:
+- Assembly-like based on LLAssembly
+- Python with pydantic-monty
+- Pure Python
+
+> ⚠️ **Work in progress:** this library is under active development. There may be
+> bugs and issues, use it carefully — reports in Issues are appreciated.
 
 ## What it is
 
@@ -31,6 +48,108 @@ This buys two things the orchestrator-agent pattern cannot guarantee:
   produce the same path every time. Execution state is persisted, so a loop can
   be paused, inspected, replayed, or resumed after a crash without losing its
   place.
+
+## Demo
+
+The following shows what happens when you use the skill in Opencode as an example.
+The goal in this example is: *"implement the retry logic in `client.py`, run the test suite,
+diagnose failures, fix them, and verify all tests pass — up to 5 attempts."*
+
+**1. Install the skill into your OpenCode config dir**
+
+```bash
+git clone https://github.com/electronick1/LLAssemblyCLI
+cd LLAssemblyCLI
+python copy_skill_to.py llassembly ~/.config/opencode/
+# ✓ Successfully created skill at: ~/.config/opencode/llassembly-agentic-loop-skill
+```
+
+**2. Start an OpenCode session with the skill loaded and state your goal**
+
+```
+> Implement retry logic in client.py, run the tests, diagnose and fix failures,
+  verify all tests pass — up to 5 attempts.
+```
+
+**3. The skill compiles the goal into a control-flow plan**
+
+The orchestrator calls `get_next_instruction.py` and is told to run the
+`llassembly-control-flow` sub-agent, which writes `plan.llassembly`:
+
+```asm
+%macro agent_implement
+%include "general/implement"
+%define OBJECTIVE "Implement retry logic in client.py"
+%define OUTPUT_1 "status: \"ok\" or \"error\""
+%endmacro
+
+%macro agent_test
+%include "general/test"
+%define OBJECTIVE "Run the test suite and report results"
+%define OUTPUT_1 "passed: \"true\" or \"false\""
+%define OUTPUT_2 "failure_summary: brief description of failures if any"
+%endmacro
+
+%macro agent_diagnose_and_fix
+%include "general/diagnose_and_fix"
+%define OBJECTIVE "Diagnose test failures and apply fixes"
+%define OUTPUT_1 "status: \"ok\" or \"error\""
+%endmacro
+
+    MOV R20, 0                  ; initialize retry counter to zero
+loop:                           ; loop head: start of retry cycle
+    agent_implement             ; invoke implement sub-agent
+    MOV R1, OUTPUT_1            ; copy implement result into R1
+    CMP R1, "ok"                ; compare implement status against "ok"
+    JNE done_fail               ; if implementation failed, jump to failure exit
+    agent_test                  ; invoke test sub-agent
+    MOV R2, OUTPUT_1            ; copy test result into R2 (distinct register)
+    CMP R2, "true"              ; compare test pass flag against "true"
+    JE done_success             ; if all tests passed, jump to success exit
+    ADD R20, 1                  ; increment retry counter by one
+    CMP R20, 5                  ; compare retry counter against max of 5 attempts
+    JGE done_fail               ; if retry budget exhausted, jump to failure exit
+    agent_diagnose_and_fix      ; invoke diagnose_and_fix sub-agent
+    JMP loop                    ; jump back to loop head to retry
+done_success:                   ; success exit label
+    MOV R10, 0                  ; set exit code to zero (success)
+    JMP done                    ; jump to single completion path
+done_fail:                      ; failure exit label
+    MOV R10, 1                  ; set exit code to one (failure)
+done:                           ; single completion label for all exit paths
+    RET                         ; return from main execution
+```
+
+**4. The driver generates any missing sub-agent definitions**
+
+Before execution begins, the driver scans the plan for every declared sub-agent and checks
+whether a definition file already exists. For each one that is missing it runs the
+`llassembly-generate-sub-agents` agent, which writes a ready-to-use `.md` definition
+into the loop's `agents/` directory.
+
+```
+[driver] → missing agent: implement   → running llassembly-generate-sub-agents...
+           ✓ agents/implement.md written
+[driver] → missing agent: test        → running llassembly-generate-sub-agents...
+           ✓ agents/test.md written
+[driver] → missing agent: diagnose_and_fix → running llassembly-generate-sub-agents...
+           ✓ agents/diagnose_and_fix.md written
+[driver] → all agents present, starting execution
+```
+
+**5. The driver executes the plan — one sub-agent at a time**
+
+```
+[driver] → run sub-agent: implement   (writes retry logic to client.py)
+[driver] → run sub-agent: test        (2 failures found)
+[driver] → run sub-agent: diagnose_and_fix  (fixes import error + off-by-one)
+[driver] → run sub-agent: test        (all tests pass)
+[driver] Execution finished. Goal is achieved.
+```
+
+Every step is appended to `/tmp/llassembly/<loop-id>/runtime.log` as JSONL. If the session
+crashes between any two steps, re-running the driver replays the log and resumes from exactly
+where it left off — no work is repeated.
 
 
 ## The concept
@@ -66,37 +185,34 @@ result feedback — is deterministic code. Control flow never leaves the code.
 
 ## Installation
 
-No dependencies needed. Git clone -> run python script to copy skills in the target dir.
-
-Two build scripts exists for different types of planners, both copy the
-shared parts of the skill into a target directory as `llassembly-agentic-loop-skill`,
-then overlay one of the emulator/planner skill parts on top. 
-The target directory must already exist.
-
+No dependencies needed. Git clone -> run a Python script to copy one of the skill variants into the target dir.
 
 ```bash
-python copy_asm_skill_to.py <target_dir>      # build the ASM-emulator variant skill
+python copy_skill_to.py llassembly <target_dir>   # build the ASM-emulator variant skill
 # or
-python copy_python_skill_to.py <target_dir>   # build the Python-planner variant skill
+python copy_skill_to.py python   <target_dir>     # build the Python-planner variant skill
+# or
+python copy_skill_to.py monty    <target_dir>     # build the Monty variant skill (WIP)
 ```
 
-
-> ⚠️ **Work in progress:** this library is under active development. There may be
-> bugs and issues, use it carefully — reports in Issues are appreciated.
-
-
 The variant you build determines which **emulator/planner** executes the plan. There are
-two, and they make different trade-offs
+three, and they make different trade-offs.
 
-### Assembly-based planner
+| Variant | Plan language | Safety | Best for |
+|---------|---------------|--------|----------|
+| `llassembly` | Assembly-like instruction set | **High** — sandboxed emulator, no file/syscall/network instructions | Small models, CLI tasks |
+| `monty` | Plain Python `def main()` | **Medium** — pydantic-monty (Rust-emulation, WIP) | Complex branching with an added safety layer |
+| `python` | Plain Python `def main()` | **Low** — raw `exec()`, sandbox required | Complex branching, structured JSON outputs |
+
+### Assembly-based planner variant
 
 Executes Assembly-like plan emitted by LLM in a lightweight emulator with a deliberately
 **limited instruction set** (`MOV`, `PUSH`/`POP`, `ADD`/`SUB`, `CMP`,
 conditional jumps, `CALL`/`RET`, and a handful of macro/`db` directives). Because
 the plan can only express this tiny, well-defined set of operations:
 
-- **No extra hardering layers required.** The emulator (see emulator.py) can only do what its
-  instruction table allows — there is no files, syscalls or internet related
+- **No extra hardening layers required.** The emulator (see emulator.py) can only do what its
+  instruction table allows — there are no file, syscall, or internet-related
   instructions; mainly: CMP, jumps, numbers/strings manipulation, that are emulated
   in a limited and controlled way, only to connect sub-agents together,
   see: `asm_skill_parts/agents/llassembly-control-flow.md` for more details.
@@ -107,15 +223,33 @@ the plan can only express this tiny, well-defined set of operations:
 This plan type shines when you want to run CLI based skills without extra infrastructure,
 and it performs quite well even on very small models like qwen3.6:35b.
 
-### Python-based planner
+### Monty-based planner variant
+
+Uses the same Python plan language as the Python variant, but replaces raw
+`exec()` with [`pydantic_monty`](https://github.com/pydantic/pydantic-monty) as
+the execution engine.
+
+
+- `pydantic-monty` does not guarantee 100% safety, since full Python emulation in
+  Rust may contain security issues in its implementation and **pydantic-monty project is itself
+  a work-in-progress**.
+- `pydantic-monty` is a non-stdlib dependency. Before running this variant, ensure `pydantic_monty`
+  is available in your Python environment. You can also specify the runtime in your prompt — for example:
+  "Use `uv run` to execute Python".
+
+This plan type is well suited when the orchestration logic is complex and
+benefits from a full programming language, with an additional layer of
+security compared to the YOLO Python variant.
+
+### YOLO Python-based planner variant
 
 Executes **raw Python emitted by the LLM**: the plan is a small script that
-declares sub-agents and drives them from an `def main()` entry point,
+declares sub-agents and drives them from a `def main()` entry point,
 branching with ordinary `if`/`while` and returning rich values.
 
 - ⚠️ **WARNING!** The Python-based planner runs LLM generated Python code,
   **it must run in a safe sandboxed environment.** Treat the python-based planner code as untrusted code! 
-  Running untrusted code is never safe — and you solely responsible for securing the
+  Running LLM generated code is never safe — and you are solely responsible for securing the
   environment in which it executes.
 - **Good for control flows with many branches and JSON outputs.** Full Python
   expressiveness makes complex branching and structured (JSON) sub-agent
@@ -125,9 +259,6 @@ This plan type is well suited when the orchestration logic is complex and
 benefits from a real programming language, but extra secure infrastructure is
 required.
 
-### Monty-based emulator (WIP)
-
-Currently work in progress ...
 
 ### Configuration
 
