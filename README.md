@@ -2,6 +2,10 @@
 
 ### Reliable, resumable, code-driven orchestration for sub-agents and agentic-loops
 
+ ⚠️  The `stable-monty` branch used only for pre-assembled releases of the skill with a pydantic-monty planner variant.
+Actual work happens on the `main` branch.
+
+
 LLAssemblyCLI is a skill whose defining idea is simple: 
 **don't let an LLM improvise the orchestration — compile the orchestration plan into the code and let code drive it.**
 
