@@ -55,107 +55,7 @@ This buys two things the orchestrator-agent pattern cannot guarantee:
   be paused, inspected, replayed, or resumed after a crash without losing its
   place.
 
-## Demo
 
-The following shows what happens when you use the skill in Opencode as an example.
-The goal in this example is: *"implement the retry logic in `client.py`, run the test suite,
-diagnose failures, fix them, and verify all tests pass — up to 5 attempts."*
-
-**1. Install the skill into your OpenCode config dir**
-
-```bash
-git clone https://github.com/electronick1/LLAssemblyCLI
-cd LLAssemblyCLI
-python copy_skill_to.py llassembly ~/.config/opencode/
-# ✓ Successfully created skill at: ~/.config/opencode/llassembly-agentic-loop-skill
-```
-
-**2. Start an OpenCode session with the skill loaded and state your goal**
-
-```
-> Implement retry logic in client.py, run the tests, diagnose and fix failures,
-  verify all tests pass — up to 5 attempts.
-```
-
-**3. The skill compiles the goal into a control-flow plan**
-
-The orchestrator calls `get_next_instruction.py` and is told to run the
-`llassembly-control-flow` sub-agent, which writes `plan.llassembly` (in one of 3 variants: assembly-like, python, python for pydantic-monty):
-
-```asm
-%macro agent_implement
-%include "general/implement"
-%define OBJECTIVE "Implement retry logic in client.py"
-%define OUTPUT_1 "status: \"ok\" or \"error\""
-%endmacro
-
-%macro agent_test
-%include "general/test"
-%define OBJECTIVE "Run the test suite and report results"
-%define OUTPUT_1 "passed: \"true\" or \"false\""
-%define OUTPUT_2 "failure_summary: brief description of failures if any"
-%endmacro
-
-%macro agent_diagnose_and_fix
-%include "general/diagnose_and_fix"
-%define OBJECTIVE "Diagnose test failures and apply fixes"
-%define OUTPUT_1 "status: \"ok\" or \"error\""
-%endmacro
-
-    MOV R20, 0                  ; initialize retry counter to zero
-loop:                           ; loop head: start of retry cycle
-    agent_implement             ; invoke implement sub-agent
-    MOV R1, OUTPUT_1            ; copy implement result into R1
-    CMP R1, "ok"                ; compare implement status against "ok"
-    JNE done_fail               ; if implementation failed, jump to failure exit
-    agent_test                  ; invoke test sub-agent
-    MOV R2, OUTPUT_1            ; copy test result into R2 (distinct register)
-    CMP R2, "true"              ; compare test pass flag against "true"
-    JE done_success             ; if all tests passed, jump to success exit
-    ADD R20, 1                  ; increment retry counter by one
-    CMP R20, 5                  ; compare retry counter against max of 5 attempts
-    JGE done_fail               ; if retry budget exhausted, jump to failure exit
-    agent_diagnose_and_fix      ; invoke diagnose_and_fix sub-agent
-    JMP loop                    ; jump back to loop head to retry
-done_success:                   ; success exit label
-    MOV R10, 0                  ; set exit code to zero (success)
-    JMP done                    ; jump to single completion path
-done_fail:                      ; failure exit label
-    MOV R10, 1                  ; set exit code to one (failure)
-done:                           ; single completion label for all exit paths
-    RET                         ; return from main execution
-```
-
-**4. The driver generates any missing sub-agent definitions**
-
-Before execution begins, the driver scans the plan for every declared sub-agent and checks
-whether a definition file already exists. For each one that is missing it runs the
-`llassembly-generate-sub-agents` agent, which writes a ready-to-use `.md` definition
-into the loop's `agents/` directory.
-
-```
-[driver] → missing agent: implement   → running llassembly-generate-sub-agents...
-           ✓ agents/implement.md written
-[driver] → missing agent: test        → running llassembly-generate-sub-agents...
-           ✓ agents/test.md written
-[driver] → missing agent: diagnose_and_fix → running llassembly-generate-sub-agents...
-           ✓ agents/diagnose_and_fix.md written
-[driver] → all agents present, starting execution
-```
-
-**5. The driver executes the plan — one sub-agent at a time**
-
-```
-[driver] → run sub-agent: implement   (writes retry logic to client.py)
-[driver] → run sub-agent: test        (2 failures found)
-[driver] → run sub-agent: diagnose_and_fix  (fixes import error + off-by-one)
-[driver] → run sub-agent: test        (all tests pass)
-[driver] Execution finished. Goal is achieved.
-```
-
-Every step is appended to `/tmp/llassembly/<loop-id>/runtime.log` as JSONL. If the session
-crashes between any two steps, re-running the driver replays the log and resumes from exactly
-where it left off — no work is repeated.
 
 
 ## The concept
@@ -285,6 +185,109 @@ to a llassembly workspace under a base directory: `/tmp/llassembly` by default
 
 To save it elsewhere, set the `LLASSEMBLY_LOOP_PATH` environment variable before
 the first execution (e.g. `export LLASSEMBLY_LOOP_PATH=~/.cache`).
+
+
+## Demo
+
+The following shows what happens when you use the skill in Opencode as an example.
+The goal in this example is: *"implement the retry logic in `client.py`, run the test suite,
+diagnose failures, fix them, and verify all tests pass — up to 5 attempts."*
+
+**1. Install the skill into your OpenCode config dir**
+
+```bash
+git clone https://github.com/electronick1/LLAssemblyCLI
+cd LLAssemblyCLI
+python copy_skill_to.py llassembly ~/.config/opencode/
+# ✓ Successfully created skill at: ~/.config/opencode/llassembly-agentic-loop-skill
+```
+
+**2. Start an OpenCode session with the skill loaded and state your goal**
+
+```
+> Implement retry logic in client.py, run the tests, diagnose and fix failures,
+  verify all tests pass — up to 5 attempts.
+```
+
+**3. The skill compiles the goal into a control-flow plan**
+
+The orchestrator calls `get_next_instruction.py` and is told to run the
+`llassembly-control-flow` sub-agent, which writes `plan.llassembly` (in one of 3 variants: assembly-like, python, python for pydantic-monty):
+
+```asm
+%macro agent_implement
+%include "general/implement"
+%define OBJECTIVE "Implement retry logic in client.py"
+%define OUTPUT_1 "status: \"ok\" or \"error\""
+%endmacro
+
+%macro agent_test
+%include "general/test"
+%define OBJECTIVE "Run the test suite and report results"
+%define OUTPUT_1 "passed: \"true\" or \"false\""
+%define OUTPUT_2 "failure_summary: brief description of failures if any"
+%endmacro
+
+%macro agent_diagnose_and_fix
+%include "general/diagnose_and_fix"
+%define OBJECTIVE "Diagnose test failures and apply fixes"
+%define OUTPUT_1 "status: \"ok\" or \"error\""
+%endmacro
+
+    MOV R20, 0                  ; initialize retry counter to zero
+loop:                           ; loop head: start of retry cycle
+    agent_implement             ; invoke implement sub-agent
+    MOV R1, OUTPUT_1            ; copy implement result into R1
+    CMP R1, "ok"                ; compare implement status against "ok"
+    JNE done_fail               ; if implementation failed, jump to failure exit
+    agent_test                  ; invoke test sub-agent
+    MOV R2, OUTPUT_1            ; copy test result into R2 (distinct register)
+    CMP R2, "true"              ; compare test pass flag against "true"
+    JE done_success             ; if all tests passed, jump to success exit
+    ADD R20, 1                  ; increment retry counter by one
+    CMP R20, 5                  ; compare retry counter against max of 5 attempts
+    JGE done_fail               ; if retry budget exhausted, jump to failure exit
+    agent_diagnose_and_fix      ; invoke diagnose_and_fix sub-agent
+    JMP loop                    ; jump back to loop head to retry
+done_success:                   ; success exit label
+    MOV R10, 0                  ; set exit code to zero (success)
+    JMP done                    ; jump to single completion path
+done_fail:                      ; failure exit label
+    MOV R10, 1                  ; set exit code to one (failure)
+done:                           ; single completion label for all exit paths
+    RET                         ; return from main execution
+```
+
+**4. The driver generates any missing sub-agent definitions**
+
+Before execution begins, the driver scans the plan for every declared sub-agent and checks
+whether a definition file already exists. For each one that is missing it runs the
+`llassembly-generate-sub-agents` agent, which writes a ready-to-use `.md` definition
+into the loop's `agents/` directory.
+
+```
+[driver] → missing agent: implement   → running llassembly-generate-sub-agents...
+           ✓ agents/implement.md written
+[driver] → missing agent: test        → running llassembly-generate-sub-agents...
+           ✓ agents/test.md written
+[driver] → missing agent: diagnose_and_fix → running llassembly-generate-sub-agents...
+           ✓ agents/diagnose_and_fix.md written
+[driver] → all agents present, starting execution
+```
+
+**5. The driver executes the plan — one sub-agent at a time**
+
+```
+[driver] → run sub-agent: implement   (writes retry logic to client.py)
+[driver] → run sub-agent: test        (2 failures found)
+[driver] → run sub-agent: diagnose_and_fix  (fixes import error + off-by-one)
+[driver] → run sub-agent: test        (all tests pass)
+[driver] Execution finished. Goal is achieved.
+```
+
+Every step is appended to `/tmp/llassembly/<loop-id>/runtime.log` as JSONL. If the session
+crashes between any two steps, re-running the driver replays the log and resumes from exactly
+where it left off — no work is repeated.
 
 ## What `plan.llassembly` looks like
 
