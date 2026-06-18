@@ -198,7 +198,19 @@ python copy_skill_to.py llassembly <target_dir>   # build the ASM-emulator varia
 # or
 python copy_skill_to.py python   <target_dir>     # build the Python-planner variant skill
 # or
-python copy_skill_to.py monty    <target_dir>     # build the Monty variant skill (WIP)
+python copy_skill_to.py monty    <target_dir>     # build the Pydantic-Monty variant skill
+```
+
+npx skills:
+```bash
+# ASM-emulator variant skill
+npx skills add https://github.com/electronick1/LLAssemblyCLI/tree/stable-llassembly/llassembly-agentic-loop-skill
+
+# Python-planner variant skill
+npx skills add https://github.com/electronick1/LLAssemblyCLI/tree/stable-python/llassembly-agentic-loop-skill
+
+# Pydantic-Monty variant skill
+npx skills add https://github.com/electronick1/LLAssemblyCLI/tree/stable-monty/llassembly-agentic-loop-skill
 ```
 
 The variant you build determines which **emulator/planner** executes the plan. There are
