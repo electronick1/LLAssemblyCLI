@@ -17,15 +17,14 @@ LLAssemblyCLI ships with 3 variants of code-driven control-flows:
 - Python with pydantic-monty
 - Pure Python
 
-> ⚠️ **Work in progress:** this library is under active development. There may be
-> bugs and issues, use it carefully — reports in Issues are appreciated.
-
-
 
 
 https://github.com/user-attachments/assets/6b28c830-390a-452e-88ec-08a71cac5a52
 
 
+
+> ⚠️ **Work in progress:** this library is under active development. There may be
+> bugs and issues, use it carefully — reports in Issues are appreciated.
 
 ## What it is
 
@@ -81,7 +80,7 @@ python copy_skill_to.py llassembly ~/.config/opencode/
 **3. The skill compiles the goal into a control-flow plan**
 
 The orchestrator calls `get_next_instruction.py` and is told to run the
-`llassembly-control-flow` sub-agent, which writes `plan.llassembly`:
+`llassembly-control-flow` sub-agent, which writes `plan.llassembly` (in one of 3 variants: assembly-like, python, python for pydantic-monty):
 
 ```asm
 %macro agent_implement
