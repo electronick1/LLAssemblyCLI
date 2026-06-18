@@ -55,6 +55,138 @@ This buys two things the orchestrator-agent pattern cannot guarantee:
   be paused, inspected, replayed, or resumed after a crash without losing its
   place.
 
+
+
+
+## The concept
+
+The plan is the program. The LLM compiles the goal into it; a code driver
+executes it; sub-agents are dispatched one at a time and their results are fed
+back so the *code* decides what happens next.
+
+```mermaid
+flowchart TD
+    goal["Natural-language goal"]
+    compile["LLM compiles the goal<br/>(used once)"]
+    plan["Control-flow plan as CODE<br/>(branches, loops, verification)"]
+    driver{"Code driver<br/>advances the plan"}
+    dispatch["Dispatch exactly ONE<br/>sub-agent for this step"]
+    agent["Sub-agent does the work<br/>(LLM performs the node)"]
+    feedback["Result fed back<br/>into plan state"]
+    done(["Goal verified — done"])
+
+    goal --> compile --> plan --> driver
+    driver -->|next step| dispatch --> agent --> feedback --> driver
+    driver -->|goal achieved| done
+
+    classDef code fill:#dff,stroke:#0aa;
+    classDef llm fill:#ffd,stroke:#aa0;
+    class plan,driver,dispatch,feedback code;
+    class compile,agent llm;
+```
+
+The yellow nodes are where an LLM is used (compile the plan once, perform the
+work at each node). Everything in blue — the plan, the driver, dispatch, and
+result feedback — is deterministic code. Control flow never leaves the code.
+
+## Installation
+
+No dependencies needed. Git clone -> run a Python script to copy one of the skill variants into the target dir.
+
+```bash
+python copy_skill_to.py llassembly <target_dir>   # build the ASM-emulator variant skill
+# or
+python copy_skill_to.py python   <target_dir>     # build the Python-planner variant skill
+# or
+python copy_skill_to.py monty    <target_dir>     # build the Pydantic-Monty variant skill
+```
+
+npx skills:
+```bash
+# ASM-emulator variant skill
+npx skills add https://github.com/electronick1/LLAssemblyCLI/tree/stable-llassembly/llassembly-agentic-loop-skill
+
+# Python-planner variant skill
+npx skills add https://github.com/electronick1/LLAssemblyCLI/tree/stable-python/llassembly-agentic-loop-skill
+
+# Pydantic-Monty variant skill
+npx skills add https://github.com/electronick1/LLAssemblyCLI/tree/stable-monty/llassembly-agentic-loop-skill
+```
+
+The variant you build determines which **emulator/planner** executes the plan. There are
+three, and they make different trade-offs.
+
+| Variant | Plan language | Safety | Best for |
+|---------|---------------|--------|----------|
+| `llassembly` | Assembly-like instruction set | **High** — sandboxed emulator, no file/syscall/network instructions | Small models, CLI tasks |
+| `monty` | Plain Python `def main()` | **Medium** — pydantic-monty (Rust-emulation, WIP) | Complex branching with an added safety layer |
+| `python` | Plain Python `def main()` | **Low** — raw `exec()`, sandbox required | Complex branching, structured JSON outputs |
+
+### Assembly-based planner variant
+
+Executes Assembly-like plan emitted by LLM in a lightweight emulator with a deliberately
+**limited instruction set** (`MOV`, `PUSH`/`POP`, `ADD`/`SUB`, `CMP`,
+conditional jumps, `CALL`/`RET`, and a handful of macro/`db` directives). Because
+the plan can only express this tiny, well-defined set of operations:
+
+- **No extra hardening layers required.** The emulator (see emulator.py) can only do what its
+  instruction table allows — there are no file, syscall, or internet-related
+  instructions; mainly: CMP, jumps, numbers/strings manipulation, that are emulated
+  in a limited and controlled way, only to connect sub-agents together,
+  see: `asm_skill_parts/agents/llassembly-control-flow.md` for more details.
+- **Plans stay stable even on small models.** The narrow grammar is easy
+  for weak models to emit correctly and to keep consistent across a long loop.
+- Emulator is based on [LLAssembly](https://github.com/electronick1/LLAssembly) project.
+
+This plan type shines when you want to run CLI based skills without extra infrastructure,
+and it performs quite well even on very small models like qwen3.6:35b.
+
+### Monty-based planner variant
+
+Uses the same Python plan language as the Python variant, but replaces raw
+`exec()` with [`pydantic_monty`](https://github.com/pydantic/monty) as
+the execution engine.
+
+
+- `pydantic-monty` does not guarantee 100% safety, since full Python emulation in
+  Rust may contain security issues in its implementation and **pydantic-monty project is itself
+  a work-in-progress**.
+- `pydantic-monty` is a non-stdlib dependency. Before running this variant, ensure `pydantic_monty`
+  is available in your Python environment. You can also specify the runtime in your prompt — for example:
+  "Use `uv run` to execute Python".
+
+This plan type is well suited when the orchestration logic is complex and
+benefits from a full programming language, with an additional layer of
+security compared to the YOLO Python variant.
+
+### YOLO Python-based planner variant
+
+Executes **raw Python emitted by the LLM**: the plan is a small script that
+declares sub-agents and drives them from a `def main()` entry point,
+branching with ordinary `if`/`while` and returning rich values.
+
+- ⚠️ **WARNING!** The Python-based planner runs LLM generated Python code,
+  **it must run in a safe sandboxed environment.** Treat the python-based planner code as untrusted code! 
+  Running LLM generated code is never safe — and you are solely responsible for securing the
+  environment in which it executes.
+- **Good for control flows with many branches and JSON outputs.** Full Python
+  expressiveness makes complex branching and structured (JSON) sub-agent
+  results natural to handle.
+
+This plan type is well suited when the orchestration logic is complex and
+benefits from a real programming language, but extra secure infrastructure is
+required.
+
+
+### Configuration
+
+The plan file (`plan.llassembly`) and the append-only `runtime.log` are written
+to a llassembly workspace under a base directory: `/tmp/llassembly` by default
+
+To save it elsewhere, set the `LLASSEMBLY_LOOP_PATH` environment variable before
+the first execution (e.g. `export LLASSEMBLY_LOOP_PATH=~/.cache`).
+
+
 ## Demo
 
 The following shows what happens when you use the skill in Opencode as an example.
@@ -156,123 +288,6 @@ into the loop's `agents/` directory.
 Every step is appended to `/tmp/llassembly/<loop-id>/runtime.log` as JSONL. If the session
 crashes between any two steps, re-running the driver replays the log and resumes from exactly
 where it left off — no work is repeated.
-
-
-## The concept
-
-The plan is the program. The LLM compiles the goal into it; a code driver
-executes it; sub-agents are dispatched one at a time and their results are fed
-back so the *code* decides what happens next.
-
-```mermaid
-flowchart TD
-    goal["Natural-language goal"]
-    compile["LLM compiles the goal<br/>(used once)"]
-    plan["Control-flow plan as CODE<br/>(branches, loops, verification)"]
-    driver{"Code driver<br/>advances the plan"}
-    dispatch["Dispatch exactly ONE<br/>sub-agent for this step"]
-    agent["Sub-agent does the work<br/>(LLM performs the node)"]
-    feedback["Result fed back<br/>into plan state"]
-    done(["Goal verified — done"])
-
-    goal --> compile --> plan --> driver
-    driver -->|next step| dispatch --> agent --> feedback --> driver
-    driver -->|goal achieved| done
-
-    classDef code fill:#dff,stroke:#0aa;
-    classDef llm fill:#ffd,stroke:#aa0;
-    class plan,driver,dispatch,feedback code;
-    class compile,agent llm;
-```
-
-The yellow nodes are where an LLM is used (compile the plan once, perform the
-work at each node). Everything in blue — the plan, the driver, dispatch, and
-result feedback — is deterministic code. Control flow never leaves the code.
-
-## Installation
-
-No dependencies needed. Git clone -> run a Python script to copy one of the skill variants into the target dir.
-
-```bash
-python copy_skill_to.py llassembly <target_dir>   # build the ASM-emulator variant skill
-# or
-python copy_skill_to.py python   <target_dir>     # build the Python-planner variant skill
-# or
-python copy_skill_to.py monty    <target_dir>     # build the Monty variant skill (WIP)
-```
-
-The variant you build determines which **emulator/planner** executes the plan. There are
-three, and they make different trade-offs.
-
-| Variant | Plan language | Safety | Best for |
-|---------|---------------|--------|----------|
-| `llassembly` | Assembly-like instruction set | **High** — sandboxed emulator, no file/syscall/network instructions | Small models, CLI tasks |
-| `monty` | Plain Python `def main()` | **Medium** — pydantic-monty (Rust-emulation, WIP) | Complex branching with an added safety layer |
-| `python` | Plain Python `def main()` | **Low** — raw `exec()`, sandbox required | Complex branching, structured JSON outputs |
-
-### Assembly-based planner variant
-
-Executes Assembly-like plan emitted by LLM in a lightweight emulator with a deliberately
-**limited instruction set** (`MOV`, `PUSH`/`POP`, `ADD`/`SUB`, `CMP`,
-conditional jumps, `CALL`/`RET`, and a handful of macro/`db` directives). Because
-the plan can only express this tiny, well-defined set of operations:
-
-- **No extra hardening layers required.** The emulator (see emulator.py) can only do what its
-  instruction table allows — there are no file, syscall, or internet-related
-  instructions; mainly: CMP, jumps, numbers/strings manipulation, that are emulated
-  in a limited and controlled way, only to connect sub-agents together,
-  see: `asm_skill_parts/agents/llassembly-control-flow.md` for more details.
-- **Plans stay stable even on small models.** The narrow grammar is easy
-  for weak models to emit correctly and to keep consistent across a long loop.
-- Emulator is based on [LLAssembly](https://github.com/electronick1/LLAssembly) project.
-
-This plan type shines when you want to run CLI based skills without extra infrastructure,
-and it performs quite well even on very small models like qwen3.6:35b.
-
-### Monty-based planner variant
-
-Uses the same Python plan language as the Python variant, but replaces raw
-`exec()` with [`pydantic_monty`](https://github.com/pydantic/monty) as
-the execution engine.
-
-
-- `pydantic-monty` does not guarantee 100% safety, since full Python emulation in
-  Rust may contain security issues in its implementation and **pydantic-monty project is itself
-  a work-in-progress**.
-- `pydantic-monty` is a non-stdlib dependency. Before running this variant, ensure `pydantic_monty`
-  is available in your Python environment. You can also specify the runtime in your prompt — for example:
-  "Use `uv run` to execute Python".
-
-This plan type is well suited when the orchestration logic is complex and
-benefits from a full programming language, with an additional layer of
-security compared to the YOLO Python variant.
-
-### YOLO Python-based planner variant
-
-Executes **raw Python emitted by the LLM**: the plan is a small script that
-declares sub-agents and drives them from a `def main()` entry point,
-branching with ordinary `if`/`while` and returning rich values.
-
-- ⚠️ **WARNING!** The Python-based planner runs LLM generated Python code,
-  **it must run in a safe sandboxed environment.** Treat the python-based planner code as untrusted code! 
-  Running LLM generated code is never safe — and you are solely responsible for securing the
-  environment in which it executes.
-- **Good for control flows with many branches and JSON outputs.** Full Python
-  expressiveness makes complex branching and structured (JSON) sub-agent
-  results natural to handle.
-
-This plan type is well suited when the orchestration logic is complex and
-benefits from a real programming language, but extra secure infrastructure is
-required.
-
-
-### Configuration
-
-The plan file (`plan.llassembly`) and the append-only `runtime.log` are written
-to a llassembly workspace under a base directory: `/tmp/llassembly` by default
-
-To save it elsewhere, set the `LLASSEMBLY_LOOP_PATH` environment variable before
-the first execution (e.g. `export LLASSEMBLY_LOOP_PATH=~/.cache`).
 
 ## What `plan.llassembly` looks like
 
