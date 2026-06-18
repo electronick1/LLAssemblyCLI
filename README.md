@@ -20,6 +20,13 @@ LLAssemblyCLI ships with 3 variants of code-driven control-flows:
 > ⚠️ **Work in progress:** this library is under active development. There may be
 > bugs and issues, use it carefully — reports in Issues are appreciated.
 
+
+
+
+https://github.com/user-attachments/assets/6b28c830-390a-452e-88ec-08a71cac5a52
+
+
+
 ## What it is
 
 The common way to orchestrate sub-agents is to put an **orchestrator agent** in
