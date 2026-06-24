@@ -27,6 +27,21 @@ Supporting files in this skill directory:
 - `agents/llassembly-generate-sub-agents.md` — sub-agent that creates the
   missing sub-agent definition files the control-flow invokes.
 
+## Spawning sub-agents
+Wherever this skill says **"spawn a sub-agent"**, use your host's
+general-purpose sub-agent primitive — do NOT do the work yourself:
+
+- **Claude Code:** the `Agent` tool (named `Task` before v2.1.63),
+  `subagent_type: "general-purpose"`.
+- **OpenCode:** the `task` tool, `subagent_type: "general"`. Deny the spawned
+  sub-agent its own `task` permission so it can't recurse.
+- **Codex:** `spawn_agent`. Codex only spawns sub-agents when the user has
+  explicitly authorized delegation for the session; if it hasn't, the loop
+  runs in the parent context. Authorize delegation before starting the loop.
+
+The driver names *which* sub-agent to run and what to pass it; If your host can't spawn,
+follow the driver's instructions inline rather than stalling.
+
 ## Execution protocol
 
 > Run the driver from the `scripts/get_next_instruction.py`.
@@ -74,7 +89,7 @@ sub-agent. Run this command exactly as it instructs.
 ### Stage 3 — Generate the control-flow
 
 When the driver instructs to run `llassembly-control-flow` -
-always launch a sub-agent (Task tool, `general` type) to execute
+always launch a sub-agent (see "Spawning sub-agents") to execute
 `agents/llassembly-control-flow.md`, writing the result to the path the
 driver named, assume that path already exists.
 
@@ -90,7 +105,7 @@ like:
 ### Stage 4 — Generate missing sub-agents
 
 When the driver instructs to run `llassembly-generate-sub-agents` - always 
-launch an agent (Task tool, `general` type) to execute `agents/llassembly-generate-sub-agents`
+launch an agent (see "Spawning sub-agents") to execute `agents/llassembly-generate-sub-agents`
 that creates the definition of sub-agents for control-flow execution, following the instructions the driver
 prints, assuming all needed paths already exist. Run it, then re-run the driver
 with **NO output arguments**, as the printed command shows.
@@ -106,7 +121,7 @@ Each driver execution now advances the emulator to the next sub-agent invocation
 prints a command like "Execute the agent `<name>` defined at `../agents/<name>` …".
 For each:
 
-1. Launch the named sub-agent with the Task tool.
+1. Launch the named sub-agent (see "Spawning sub-agents").
 2. Re-run the driver, passing the sub-agent's **output arguments** exactly as the
     printed command shows. The driver prints a re-run command with one
    placeholder per expected output; replace each placeholder with the sub-agent's
