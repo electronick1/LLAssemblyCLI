@@ -7,12 +7,11 @@ LLAssemblyCLI is a skill whose defining idea is simple:
 
 1. **LLM compiles** the goal into an explicit control-flow program (`plan.llassembly`) — once.
 2. **Runs** that program with a deterministic code driver that dispatches sub-agents one at a
-   time, feeds their results back into the program's state, and lets **code** decide the next
-   branch, retry, or loop — never an LLM.
+   time, feeds their results back into the control-flow state that decides what should be the next step.
 3. **Persists** every step to an append-only log so the loop can be paused, inspected, and
    resumed after a crash without losing its place.
 
-LLAssemblyCLI ships with 3 variants of code-driven control-flows:
+LLAssemblyCLI ships with 3 variants of control-flows:
 - Assembly-like based on LLAssembly
 - Python with pydantic-monty
 - Pure Python
@@ -29,21 +28,18 @@ https://github.com/user-attachments/assets/6b28c830-390a-452e-88ec-08a71cac5a52
 ## What it is
 
 The common way to orchestrate sub-agents is to put an **orchestrator agent** in
-charge: a top-level LLM decides, step by step and in natural language, which
-sub-agent to call next, reads the output, then reasons about what to do after
-that. The control flow lives inside the model's head. It is flexible, but it is
-also **non-deterministic and hard to reproduce** — the same goal can take a
-different path on every run, the branching logic is implicit, and long loops
-drift as the context window fills with history.
+charge. The control flow lives inside the model's head and depends on the multiple
+factors during runtime.
 
 LLAssembly inverts this. Instead of orchestrating sub-agents *with* an
 orchestrating agent, the LLM is used **once** to compile the goal into an
-explicit **control-flow plan written as code** (`plan.llassembly`). From that
-point on, a small, deterministic driver/emulator executes the plan: it advances
-to the next sub-agent invocation, asks the harness to run exactly that one
-sub-agent, feeds the returned result back into the plan's state, and lets the
-**code** — not a model — decide the next branch, retry, or loop. The model only
-performs the work at each node; the plan owns the control flow.
+explicit **control-flow plan written as code** (`plan.llassembly`). 
+After that, the agent loop executes that plan:
+- It runs one sub-agent per step
+- Feeds each result back to the code-plan
+- Decides on the next step based on the control-flow pre-defined as a code 
+
+When loop is started the **pre-generated code** — never the model — decides the next branch, retry, or loop.
 
 This buys two things the orchestrator-agent pattern cannot guarantee:
 
@@ -54,15 +50,6 @@ This buys two things the orchestrator-agent pattern cannot guarantee:
   produce the same path every time. Execution state is persisted, so a loop can
   be paused, inspected, replayed, or resumed after a crash without losing its
   place.
-
-
-
-
-## The concept
-
-The plan is the program. The LLM compiles the goal into it; a code driver
-executes it; sub-agents are dispatched one at a time and their results are fed
-back so the *code* decides what happens next.
 
 ```mermaid
 flowchart TD
