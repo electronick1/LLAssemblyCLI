@@ -1,0 +1,3 @@
+
+A skill named `{skill_name}` already exists at `{skill_dir}`.
+Ask the user for a different name, then re-run with `--save "<name>" --whoamcli <cli>`.
