@@ -422,7 +422,42 @@ def main():
 
 ### Mermaid variant
 
+<details>
+<summary>Click to expand rendered mermaid:</summary>
+
 ```mermaid
+flowchart TD
+    %% A gate before any work. Nothing precedes it, so it needs its own sub-agent ({{ }})
+    start([start]) --> q_clean
+    q_clean{{"Is the working tree clean and on the release branch?"}}
+    q_clean -- true --> w_build
+    q_clean -- false --> abort
+
+    %% An error edge is worth drawing only because a real recovery follows it
+    w_build[[build: Build the release artifact from source]] --> w_test
+    w_build -- error --> w_deps
+    w_deps[[repair_deps: Reinstall dependencies and clear the build cache]] --> w_build
+
+    %% run_tests reports its own status and answers the question below, in one call
+    w_test[[run_tests: Run the full test suite against the built artifact]] --> d_pass
+    d_pass{"Did every test pass?"}
+    d_pass -- true --> w_publish
+    d_pass -- false --> w_fix
+    w_fix[[fix_tests: Diagnose the failing tests and patch the source]] --> w_build
+
+    %% Verify the outcome rather than trusting the step that produced it
+    w_publish[[publish: Publish the artifact to the release channel]] --> d_live
+    d_live{"Is the published release reachable and serving the new version?"}
+    d_live -- true --> finish
+    d_live -- false --> w_rollback
+    w_rollback[[rollback: Restore the release channel to the previous version]] --> abort
+
+    finish([done])
+    abort([abort])
+```
+</details>
+
+```
 flowchart TD
     %% A gate before any work. Nothing precedes it, so it needs its own sub-agent ({{ }})
     start([start]) --> q_clean
