@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import builtins
 import logging
 import queue
@@ -8,6 +10,9 @@ from typing import Any, Callable, Generator, Protocol, Self
 logger = logging.getLogger("llassembly_python")
 logger.addHandler(logging.NullHandler())
 
+# Extension the driver uses for this variant's control-flow file (plan_llassembly.<ext>).
+PLAN_EXTENSION = "py"
+
 
 @dataclass
 class SubAgent:
@@ -15,19 +20,6 @@ class SubAgent:
     include_path: str
     objective: str | None
     outputs_spec: dict[str, str] = field(default_factory=dict)
-
-    @classmethod
-    def from_base_sub_agent(cls, base_sub_agent_class: type[BaseSubAgent]) -> Self:
-        return cls(
-            name=base_sub_agent_class.name,
-            include_path=(
-                "global"
-                if base_sub_agent_class.existing
-                else f"general/{base_sub_agent_class.name}"
-            ),
-            objective=base_sub_agent_class.objective,
-            outputs_spec=base_sub_agent_class.output_spec,
-        )
 
 
 @dataclass
@@ -37,60 +29,99 @@ class SubAgentContext:
     infer_result_hook: Callable[[str, dict[str, Any]], None] | InferResultHook
 
 
-class BaseSubAgent:
-    """Base class plans subclass to declare a sub-agent.
+@dataclass
+class _ScriptResult:
+    """Mutable holder used to communicate a background script's outcome back to
+    its owning :class:`Emulator` without sharing ``self`` with the script thread."""
 
-    The emulator injects this class directly into the plan's global namespace
-    (see :func:`_make_script_globals`), so plans never import it. Plans subclass
-    it at *global scope*, supplying ``name`` / ``objective`` / ``output_spec`` /
-    ``existing`` as class attributes::
+    done: threading.Event = field(default_factory=threading.Event)
+    error: BaseException | None = None
 
-        class AgentBuild(BaseSubAgent):
-            name = "build"
-            objective = "Build the project artifact from source"
-            output_spec = {"status": '"ok" on success or "error" on failure'}
-            existing = False
 
-    Every subclass is collected via :meth:`__init_subclass__` into the
-    per-emulator ``_registry`` so :meth:`Emulator.get_sub_agents` can enumerate
-    every declared agent without instantiating or running it.
+_ALLOWED_MODULES = frozenset(
+    {"json", "math", "re", "string", "datetime"}
+)
+
+
+def _limited_import(name, globals=None, locals=None, fromlist=(), level=0):
+    if level != 0 or name.partition(".")[0] not in _ALLOWED_MODULES:
+        raise ImportError(f"plans may not import {name!r}")
+    return builtins.__import__(name, globals, locals, fromlist, level)
+
+
+_LIMITED_BUILTIN_NAMES = (
+    "bool",
+    "dict",
+    "float",
+    "int",
+    "list",
+    "set",
+    "str",
+    "tuple",
+    "abs",
+    "all",
+    "any",
+    "enumerate",
+    "len",
+    "max",
+    "min",
+    "range",
+    "repr",
+    "round",
+    "sorted",
+    "sum",
+    "zip",
+    "isinstance",
+    "AssertionError",
+    "Exception",
+    "IndexError",
+    "KeyError",
+    "RuntimeError",
+    "TypeError",
+    "ValueError",
+)
+
+_LIMITED_BUILTINS = {name: getattr(builtins, name) for name in _LIMITED_BUILTIN_NAMES}
+_LIMITED_BUILTINS["__import__"] = _limited_import
+
+
+def _make_script_globals(
+    sub_agents: dict[str, SubAgent], ingestion_queue: queue.Queue
+) -> dict[str, Any]:
+    """Build the globals dict used to exec a plan, with the two runtime functions
+    injected directly into the namespace.
+
+    Plans declare a sub-agent with a top-level ``setup_sub_agent(...)`` call and
+    dispatch to it with ``run_sub_agent(name)`` inside ``main()``; ``__builtins__``
+    is the restricted ``_LIMITED_BUILTINS`` mapping, not the real one.
+
+    Both functions close over the caller's ``sub_agents`` registry and
+    ``ingestion_queue``, so each emulator run -- and each declaration scan --
+    gets its own pair and they never see each other's state.
     """
 
-    # The ingestion queue this agent publishes requests to. Bound per-emulator
-    # so that concurrent ``Emulator`` instances never share state.
-    _ingestion_queue: queue.Queue | None = None
-    # The per-emulator collection of declared subclasses. A fresh list is bound
-    # onto the queue-bound base created per run (see ``_make_run_base``), so
-    # concurrent emulators never see each other's agents.
-    _registry: list[type] | None = None
+    def setup_sub_agent(
+        name: str,
+        objective: str,
+        output_spec: dict[str, str],
+        existing: bool = False,
+    ) -> None:
+        """Register one declared sub-agent. Keyed by name, so a duplicate
+        declaration replaces the earlier one."""
+        sub_agents[name] = SubAgent(
+            name=name,
+            include_path="global" if existing else f"general/{name}",
+            objective=objective,
+            outputs_spec=output_spec,
+        )
 
-    # Metadata supplied by plan subclasses as class attributes. Declared here as
-    # defaults so the contract is explicit and instances need no constructor
-    # arguments (``AgentBuild()``).
-    name: str = ""
-    objective: str = ""
-    output_spec: dict[str, str] = {}
-    existing: bool = False
+    def run_sub_agent(name: str) -> dict[str, Any]:
+        """Dispatch one sub-agent and return its result.
 
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        # Register this subclass into the nearest ancestor that owns a registry.
-        # The queue-bound base created per emulator run *defines* ``_registry``
-        # in its own ``__dict__`` and must NOT register itself; only plan
-        # subclasses, which merely *inherit* the registry, are collected.
-        registry = cls._registry
-        if registry is not None and "_registry" not in cls.__dict__:
-            registry.append(cls)
-
-    def run(self) -> dict[str, Any]:
-        """Execute this sub-agent and return its result.
-
-        Blocks the calling thread until the host emulator fulfils the request
-        via a threading.Event, then returns the result dict keyed by
-        ``output_spec``.
+        Publishes the request onto the ingestion queue the host emulator drains,
+        then blocks the calling thread on a threading.Event until the driver
+        supplies the values, and returns them keyed by ``output_spec``.
         """
-        if self._ingestion_queue is None:
-            raise RuntimeError("sub-agent is not bound to an emulator ingestion queue")
         event = threading.Event()
         result_holder: dict[str, Any] = {}
 
@@ -98,67 +129,22 @@ class BaseSubAgent:
             result_holder.update(values)
             event.set()
 
-        self._ingestion_queue.put(
-            (SubAgent.from_base_sub_agent(self.__class__), _write_result)
-        )
+        ingestion_queue.put((name, _write_result))
         event.wait()
         return dict(result_holder)
 
-
-def _make_run_base(
-    ingestion_queue: queue.Queue,
-) -> tuple[type[BaseSubAgent], list[type[BaseSubAgent]]]:
-    """Build a fresh, queue-bound :class:`BaseSubAgent` subclass for one run.
-
-    A distinct base is created per emulator run and injected into the plan's
-    globals (see :func:`_make_script_globals`). Subclassing this (not the shared
-    module-level ``BaseSubAgent``) is what binds plan agents to *this* run's
-    ingestion queue and registry.
-
-    The returned ``registry`` is the per-run collection of declared subclasses.
-    The queue-bound base owns it; ``BaseSubAgent.__init_subclass__`` appends to
-    it. Concurrent emulators get distinct lists, so their agents never mix.
-    """
-    registry: list[type[BaseSubAgent]] = []
-    run_base = type(
-        "BaseSubAgent",
-        (BaseSubAgent,),
-        {
-            "_ingestion_queue": ingestion_queue,
-            "_registry": registry,
-        },
-    )
-    return run_base, registry
-
-
-@dataclass
-class _ScriptResult:
-    """Mutable holder used to communicate a background script's outcome back to
-    its owning :class:`Emulator` without sharing ``self`` with the worker."""
-
-    done: threading.Event = field(default_factory=threading.Event)
-    error: BaseException | None = None
-
-
-def _make_script_globals(run_base: type[BaseSubAgent]) -> dict[str, Any]:
-    """Build the globals dict used to exec a plan, with ``BaseSubAgent``
-    injected directly into the namespace.
-
-    The per-run, queue-bound base (see :func:`_make_run_base`) is placed into
-    the plan's globals under the name ``BaseSubAgent``. Plans subclass it at
-    global scope without importing anything; ``__builtins__`` is the unmodified
-    real builtins.
-    """
     return {
         "__name__": "__user_script__",
         "__file__": "<string>",
-        "__builtins__": vars(builtins),
-        "BaseSubAgent": run_base,
+        "__builtins__": _LIMITED_BUILTINS,
+        "setup_sub_agent": setup_sub_agent,
+        "run_sub_agent": run_sub_agent,
     }
 
 
 def _run_script(
     code: str,
+    sub_agents: dict[str, SubAgent],
     ingestion_queue: queue.Queue,
     result: _ScriptResult,
 ) -> None:
@@ -169,8 +155,7 @@ def _run_script(
     entry point; this function execs the plan body (which only declares agents
     and defines ``main``) and then calls ``main`` directly.
     """
-    run_base, _registry = _make_run_base(ingestion_queue)
-    script_globals = _make_script_globals(run_base)
+    script_globals = _make_script_globals(sub_agents, ingestion_queue)
     try:
         exec(compile(code, "<string>", "exec"), script_globals)
         main = script_globals.get("main")
@@ -199,18 +184,22 @@ class InferResultHook:
 class Emulator:
     def __init__(self, code: str):
         # Retained so ``get_sub_agents`` can statically collect the declared
-        # sub-agent subclasses by exec'ing the plan body in isolation.
+        # sub-agents by exec'ing the plan body in isolation.
         self._code = code
         # Per-instance queue so concurrent emulators never share request state.
         self.ingestion_queue: queue.Queue = queue.Queue()
+        # Per-instance registry the plan's ``setup_sub_agent`` calls populate;
+        # ``iter_tool_calls`` looks the declared SubAgent up by name when the
+        # plan dispatches one.
+        self._sub_agents: dict[str, SubAgent] = {}
 
         # The entire script -- compilation and execution -- runs in a
-        # dedicated background thread and blocks there. The worker reports back
+        # dedicated background thread and blocks there. That thread reports back
         # through ``_result`` instead of receiving ``self``.
         self._result = _ScriptResult()
         self._thread = threading.Thread(
             target=_run_script,
-            args=(code, self.ingestion_queue, self._result),
+            args=(code, self._sub_agents, self.ingestion_queue, self._result),
             daemon=True,
         )
         self._thread.start()
@@ -236,27 +225,21 @@ class Emulator:
     def get_sub_agents(self) -> dict[str, SubAgent]:
         """Statically collect every sub-agent the plan declares.
 
-        Executes the plan's module body in an isolated namespace with a fresh,
-        throwaway queue-bound base injected as ``BaseSubAgent``. Running the body
-        is enough to define every global-scope ``class AgentX(BaseSubAgent)``;
-        each definition registers itself via
-        :meth:`BaseSubAgent.__init_subclass__`. We then convert each collected
-        subclass into a :class:`SubAgent`.
+        Executes the plan's module body in an isolated namespace with a fresh
+        registry and a throwaway queue. Running the body is enough for every
+        global-scope ``setup_sub_agent(...)`` call to register itself into that
+        registry.
 
-        This is a pure declaration scan. The plan body only declares agent
-        classes and defines ``main``; ``main`` is never called here,
-        so exec'ing the body invokes no sub-agent.
+        This is a pure declaration scan. The plan body only declares agents and
+        defines ``main``; ``main`` is never called here, so exec'ing the body
+        dispatches no sub-agent -- which is why the throwaway queue is never
+        drained.
         """
-        # A throwaway queue: we never dispatch from this scan, so the queue is
-        # unused, but the bound base still needs one.
-        run_base, registry = _make_run_base(queue.Queue())
-        script_globals = _make_script_globals(run_base)
-        exec(compile(self._code, "<string>", "exec"), script_globals)
-
         sub_agents: dict[str, SubAgent] = {}
-        for agent_cls in registry:
-            sub_agent = SubAgent.from_base_sub_agent(agent_cls)
-            sub_agents[sub_agent.name] = sub_agent
+        exec(
+            compile(self._code, "<string>", "exec"),
+            _make_script_globals(sub_agents, queue.Queue()),
+        )
         return sub_agents
 
     def iter_tool_calls(self) -> Generator[SubAgentContext, None, None]:
@@ -271,11 +254,12 @@ class Emulator:
                     break
                 continue
 
-            emulator_agent, hook = item
+            sub_agent_name, hook = item
+            sub_agent = self._sub_agents[sub_agent_name]
             sub_agent_context = SubAgentContext(
-                emulator_agent,
-                list(emulator_agent.outputs_spec.keys()),
-                InferResultHook(emulator_agent, hook),
+                sub_agent,
+                list(sub_agent.outputs_spec.keys()),
+                InferResultHook(sub_agent, hook),
             )
 
             yield sub_agent_context
