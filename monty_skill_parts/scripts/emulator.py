@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import builtins
 import logging
 import queue
@@ -9,6 +11,9 @@ import pydantic_monty
 
 logger = logging.getLogger("llassembly_python")
 logger.addHandler(logging.NullHandler())
+
+# Extension the driver uses for this variant's control-flow file (plan_llassembly.<ext>).
+PLAN_EXTENSION = "py"
 
 
 @dataclass
@@ -29,7 +34,7 @@ class SubAgentContext:
 @dataclass
 class _ScriptResult:
     """Mutable holder used to communicate a background script's outcome back to
-    its owning :class:`Emulator` without sharing ``self`` with the worker."""
+    its owning :class:`Emulator` without sharing ``self`` with the script thread."""
 
     done: threading.Event = field(default_factory=threading.Event)
     error: BaseException | None = None
@@ -52,6 +57,8 @@ class ScriptRunnner:
         )
 
     def run_sub_agent_hook(self, sub_agent_name: str):
+        if self._ingestion_queue is None:
+            return {}
         event = threading.Event()
         result_holder: dict[str, Any] = {}
 
@@ -99,7 +106,8 @@ class ScriptRunnner:
                     for kw in ["name", "objective", "output_spec", "existing"]:
                         if kw in monty_result.kwargs:
                             args.append(monty_result.kwargs[kw])
-                    self.setup_sub_agent_hook(*args)
+                    name, objective, output_spec, existing = args
+                    self.setup_sub_agent_hook(name, objective, output_spec, existing)
                     monty_result = monty_result.resume({"return_value": None})
                 elif monty_result.function_name == "run_sub_agent":
                     (name,) = monty_result.args
@@ -141,7 +149,7 @@ class Emulator:
         self._runner = ScriptRunnner(self.ingestion_queue)
 
         # The entire script -- compilation and execution -- runs in a
-        # dedicated background thread and blocks there. The worker reports back
+        # dedicated background thread and blocks there. That thread reports back
         # through ``_result`` instead of receiving ``self``.
         self._result = _ScriptResult()
         self._thread = threading.Thread(
@@ -170,31 +178,12 @@ class Emulator:
         return cls(code)
 
     def get_sub_agents(self) -> dict[str, SubAgent]:
-        # Create a queue and result holder for the scan runner
-        scan_queue: queue.Queue = queue.Queue()
         scan_result = _ScriptResult()
-        runner = ScriptRunnner(scan_queue)
-
-        # Start the runner in a dedicated thread, just like in __init__
-        scan_thread = threading.Thread(
-            target=runner.run,
-            args=(self._code, scan_result),
-            daemon=True,
-        )
-        scan_thread.start()
-
-        # Wait for the first setup_sub_agent call to populate _sub_agents
-        while True:
-            try:
-                scan_queue.get(timeout=0.1)
-                break
-            except queue.Empty:
-                # Check if the script has finished (no more sub-agents to register)
-                if scan_result.done.is_set():
-                    break
-                continue
-
-        # Convert the collected SubAgent list into a dict keyed by name
+        runner = ScriptRunnner(ingestion_queue=None)
+        try:
+            runner.run(self._code, scan_result)
+        except BaseException:
+            pass
         return runner._sub_agents
 
     def iter_tool_calls(self) -> Generator[SubAgentContext, None, None]:
