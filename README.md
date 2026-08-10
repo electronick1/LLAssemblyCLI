@@ -2,6 +2,10 @@
 
 ### Code driven agents orchestration
 
+ ⚠️ The `stable-mermaid` branch used only for pre-assembled releases of the skill with a
+ mermaid planner variant. Actual work happens on the `main` branch.
+
+
 LLAssemblyCLI is a portable skill for agents orchestration that you can run in agentic CLI
 you already use:
 1. **Compiles** your request into an explicit control-flow program to orchestrate sub-agents.
