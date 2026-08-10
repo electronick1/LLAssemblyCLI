@@ -2,7 +2,7 @@
 
 ### Code driven agents orchestration
 
- ⚠️  The `python-stable` branch used only for pre-assembled releases of the skill with a python planner variant.
+ ⚠️  The `stable-python` branch used only for pre-assembled releases of the skill with a python planner variant.
 Actual work happens on the `main` branch.
 
 LLAssemblyCLI is a portable skill for agents orchestration that you can run in agentic CLI
