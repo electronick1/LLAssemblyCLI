@@ -1,0 +1,52 @@
+
+# Stage 5. Follow instructions:
+
+SPAWN A NEW AGENT to run the sub-agent `{agent_name}`, defined at `{agent_path}`.
+
+## Your only job on this stage is to:
+
+1) SPAWN A NEW AGENT that runs the sub-agent definition file at `{agent_path}`, doing the
+work that satisfies the objective and the user request.
+2) As an orchestrator after the above sub-agent is finished you must continue, re-run:
+`python scripts/get_next_instruction.py --llassembly-session {workflow_id}`
+with no further arguments, and when it gives you next agent to execute - follow next instructions.
+
+## How to delegate work to a new sub-agent:
+
+1) Define the prompt that will be sent to the new agent.
+
+2) In that prompt you must include the text (intended for the sub-agent,
+not for you), stating the following (all statements required — keep their wording as printed;
+fill in the placeholders and add the goal details, but do not reword or shorten them):
+```
+
+- You are a sub-agent inside an already running workflow, not the orchestrator. You do the work
+specified and exit right after that.
+- You are not allowed to run scripts/get_next_instruction.py, this is not your scope!
+- Your scope of work is the following:
+
+a) Read and follow `{agent_path}` — it is your procedure;
+b) Do the part of the work that satisfies the objective
+c) As your FINAL step, write report in JSON format to: `{result_path}` by conforming to
+JSON schema — one object with exactly the keys under `properties`, following the types and purpose of each:
+{output_schema}
+
+```
+
+3) You must tell the sub-agent what it needs to do and what its objective is, based on:
+- its scope of work in the current iteration of the workflow
+- every limit the user placed on the work — what must not be run, executed, installed or
+  accessed. The sub-agent cannot see the user's request, so restate them.
+- The workdir is `{workdir}` — objective deliverables go there;
+- The JSON report goes to `{result_path}` and nowhere else
+
+## Wait for spawned sub-agent to finish, when the sub-agent is done:
+
+Immediately re-run:
+`python scripts/get_next_instruction.py --llassembly-session {workflow_id}`
+seeking for the next instruction and following what it says.
+
+Do not verify result of the sub-agent, continue seeking for the next instruction
+no matter what the state is — the driver decides what is needed. Do not read or list
+`{agent_path}`, `{result_path}` or anything under the workflow directory.
+
