@@ -1,0 +1,40 @@
+
+# Stage 2. Follow instructions:
+
+## Your only job on this stage is to:
+
+1) SPAWN A NEW AGENT that runs the worker file `references/workers/llassembly-control-flow.md`
+(under the `llassembly-agentic-workflow` skill) as a separate unit of work whose only job
+is to generate the control-flow plan that satisfies the goal of the request. You do not
+create any directory, or write `{plan_path}` yourself.
+2) As an orchestrator after the above worker is finished you must continue, re-run:
+`python scripts/get_next_instruction.py --llassembly-session {workflow_id}`
+with no further arguments, and follow next instructions.
+
+## How to delegate work to a new agent:
+
+1) Define the prompt that will be sent to the new agent.
+
+2) In that prompt you must include the text (intended for the worker, not
+for you), stating the following (all statements required — keep their wording as printed;
+fill in the placeholders and add the goal details, but do not reword or shorten them):
+```
+- You are a worker inside an already running `llassembly-agentic-workflow` skill, not
+the orchestrator. You do the work specified and exit right after that.
+- As a worker you are not allowed to run scripts/get_next_instruction.py, this is not your scope!
+- Your scope of work is to translate the goal into executable control-flow, exactly following
+`references/workers/llassembly-control-flow.md` from the "llassembly-agentic-workflow" skill, 
+and write it to the file: `{plan_path}`.
+Writing `{plan_path}` is your only job. As soon as it is written your job is done - exit immediately.
+```
+
+3) You must specify to the worker, in detail, what the goal is based on the user request.
+If a plan error is printed above, quote it in the prompt so the worker fixes that error.
+
+
+## Wait for spawned agent to finish, when the agent is done:
+
+Immediately re-run:
+`python scripts/get_next_instruction.py --llassembly-session {workflow_id}`
+seeking for the next instruction and following what it says.
+

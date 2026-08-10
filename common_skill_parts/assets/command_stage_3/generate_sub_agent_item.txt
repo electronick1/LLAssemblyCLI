@@ -1,0 +1,4 @@
+
+Sub-agent `{sub_agent_name}` — write its definition to `{sub_agent_path}`:
+- name: `{sub_agent_name}`
+- objective: `{sub_agent_objective}`
