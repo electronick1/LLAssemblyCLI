@@ -1,7 +1,0 @@
-Execution finished. Goal is achieved.
-
-Stop here; run nothing else. Report what was produced and where. Never quote a count or
-detail from a sub-agent's reply as if you had checked it.
-
-If no sub-agent was ever launched in this workflow, the plan did not do the work: say so
-and name what is missing, instead of reporting the goal as achieved.

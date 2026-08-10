@@ -1,3 +1,0 @@
-Provide a valid skill name via --save <name> (letters, digits and hyphens).
-Re-run `python scripts/get_next_instruction.py --llassembly-session <id> --save "<name>" --whoamcli <cli>`,
-using the same id you have been carrying.

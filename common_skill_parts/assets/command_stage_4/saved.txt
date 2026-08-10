@@ -1,3 +1,0 @@
-
-Skill saved under name `{skill_name}` at `{skill_dir}`.
-Execution finished. Goal is achieved.

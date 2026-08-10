@@ -1,3 +1,0 @@
-Provide your CLI type via --whoamcli so the skill saves under the project's skills directory.
-Valid values: {cli_types}.
-Re-run `python scripts/get_next_instruction.py --llassembly-session {workflow_id} --save "<name>" --whoamcli <cli>`.

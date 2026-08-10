@@ -1,8 +1,0 @@
-
-# Stage 1.2. follow instructions:
-
-Give the full directory path where the results of this request should be saved. That is
-the working directory for the deliverables, NOT the llassembly skill directory.
-
-Re-run `python scripts/get_next_instruction.py --llassembly-session {workflow_id} "<path>"`
-writing the path as 1 argument.
