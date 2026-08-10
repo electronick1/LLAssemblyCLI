@@ -1,0 +1,12 @@
+
+# Stage 1.1. follow instructions:
+
+The following `--llassembly-session {workflow_id}` must be used for all future calls
+to `scripts/get_next_instruction.py`.
+
+Always re-run from the llassembly skill directory to seek next instruction:
+`python scripts/get_next_instruction.py --llassembly-session {workflow_id}`.
+
+The --llassembly-session argument is never optional: without it the driver initiates
+a new workflow instead of following the current one.
+
